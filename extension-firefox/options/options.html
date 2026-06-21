@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EazyFill Options</title>
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-text">
+          <img id="brand-logo" class="brand-logo" src="../brand/logo-dark.png" alt="EazyFill">
+          <p id="connection-label" class="workspace-status">Checking status</p>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Settings sections">
+        <div class="nav-group-label">Workspace</div>
+        <button class="nav-item active" data-panel="overview-panel" data-category="Dashboard">Overview</button>
+        <div class="nav-group-label">Automation</div>
+        <button class="nav-item" data-panel="profiles-panel" data-category="Automation">Profiles</button>
+        <button class="nav-item" data-panel="rules-panel" data-category="Automation">Autofill Rules</button>
+        <button class="nav-item" data-panel="captcha-panel" data-category="Automation">Autosolve Captcha</button>
+        <button class="nav-item" data-panel="scripts-panel" data-category="Automation">Userscript</button>
+        <div class="nav-group-label">System</div>
+        <button class="nav-item" data-panel="settings-panel" data-category="System">Settings</button>
+        <div class="nav-group-label">Account</div>
+        <button class="nav-item" data-panel="account-panel" data-category="Account">Account & Plan</button>
+        <button class="nav-item" data-panel="sync-panel" data-category="Account">Sync</button>
+      </nav>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="panel-eyebrow">Dashboard</p>
+          <h2 id="panel-title">Overview</h2>
+        </div>
+        <div class="topbar-actions">
+          <button class="cmd-badge search-badge" id="cmd-palette-btn" title="Open Command Palette (Ctrl+K)">
+            <span class="search-label">Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <button class="icon-btn" id="theme-toggle-btn" title="Toggle Theme" aria-label="Toggle Theme">
+            <svg class="theme-icon sun-icon is-hidden" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.22" x2="5.64" y2="17.78"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+            <svg class="theme-icon moon-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+          </button>
+          <button class="icon-btn" id="refresh-btn" title="Refresh" aria-label="Refresh">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+          <button class="primary-btn" id="save-all-btn">Save</button>
+        </div>
+      </header>
+
+      <div class="panels-container">
+        <!-- Overview Panel -->
+        <section class="panel active" id="overview-panel" data-title="Overview">
+          <div class="welcome-banner">
+            <div>
+              <p class="eyebrow">Extension Workspace</p>
+              <h3>Manage automation, routes, scripts, and usage in one place.</h3>
+            </div>
+            <button class="secondary-btn" data-jump="account-panel" type="button">Account & Plan</button>
+          </div>
+          <div class="overview-grid">
+            <div class="overview-card hero-card credits-hero">
+              <div class="card-header">
+                <span class="card-title">Credits Balance</span>
+                <span class="card-kicker">CAPTCHA</span>
+              </div>
+              <div class="card-main-val">
+                <span class="card-value glow" id="overview-credits-remaining">0</span>
+                <span class="card-value-slash" id="overview-credits-limit">/ 0</span>
+              </div>
+              <div class="progress-bar-container" title="Daily limit usage progress">
+                <div class="progress-bar-fill" id="overview-credits-progress"></div>
+              </div>
+              <span class="card-subtext" id="overview-credits-used">Used 0 today</span>
+              <button class="card-action-link" data-jump="account-panel" type="button">View plan</button>
+            </div>
+            <div class="overview-card hero-card">
+              <div class="card-header">
+                <span class="card-title">Autofill Rules</span>
+                <span class="card-kicker">Forms</span>
+              </div>
+              <div class="card-main-val">
+                <span class="card-value" id="overview-rules-count">0</span>
+              </div>
+              <span class="card-subtext" id="overview-profiles-count">0 active profiles</span>
+              <button class="card-action-link" data-jump="rules-panel" type="button">Manage rules</button>
+            </div>
+            <div class="overview-card hero-card">
+              <div class="card-header">
+                <span class="card-title">Userscript</span>
+                <span class="card-kicker">Custom JS</span>
+              </div>
+              <div class="card-main-val">
+                <span class="card-value" id="overview-scripts-count">0</span>
+              </div>
+              <span class="card-subtext">Profile userscripts</span>
+              <button class="card-action-link" data-jump="scripts-panel" type="button">Manage scripts</button>
+            </div>
+            <div class="overview-card hero-card">
+              <div class="card-header">
+                <span class="card-title">Account Tier</span>
+                <span class="card-kicker">Plan</span>
+              </div>
+              <div class="card-main-val">
+                <span class="card-value card-value-small" id="overview-account-plan">--</span>
+              </div>
+              <span class="card-subtext" id="overview-account-user">Disconnected</span>
+              <button class="card-action-link" data-jump="account-panel" type="button">Manage plan</button>
+            </div>
+          </div>
+
+          <h3 class="section-title">Quick Actions</h3>
+          <div class="action-grid">
+            <div class="action-card" data-jump="rules-panel">
+              <h3>New Autofill</h3>
+              <p>Record form field rule</p>
+            </div>
+            <div class="action-card" data-jump="scripts-panel">
+              <h3>Add Userscript</h3>
+              <p>Write custom page script</p>
+            </div>
+            <div class="action-card" data-jump="captcha-panel">
+              <h3>Autosolve Captcha</h3>
+              <p>Configure auto-selectors</p>
+            </div>
+            <div class="action-card" data-jump="profiles-panel">
+              <h3>Profiles</h3>
+              <p>Manage reusable form data</p>
+            </div>
+            <div class="action-card" data-jump="account-panel">
+              <h3>Account & Plan</h3>
+              <p>Sign in or upgrade</p>
+            </div>
+            <div class="action-card" data-jump="sync-panel">
+              <h3>Sync Data</h3>
+              <p>Push or pull backups</p>
+            </div>
+          </div>
+
+          <div class="surface">
+            <div class="section-head">
+              <h3>Live Activity & Status</h3>
+            </div>
+            <div class="activity-list">
+              <div class="activity-item">
+                <div class="activity-info">
+                  <span class="activity-dot"></span>
+                  <span class="activity-text">System is connected and standing by</span>
+                </div>
+                <span class="activity-time">Just now</span>
+              </div>
+              <div class="activity-item">
+                <div class="activity-info">
+                  <span class="activity-dot is-success"></span>
+                  <span class="activity-text">Autofill automation engine running</span>
+                </div>
+                <span class="activity-time">Stable</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Autofill Panel -->
+        <section class="panel" id="rules-panel" data-title="Autofill">
+          <!-- List View -->
+          <div id="rules-list-view">
+            <section class="surface admin-table-surface">
+              <div class="admin-panel-head">
+                <div class="admin-title-wrap">
+                  <span class="admin-icon">AF</span>
+                  <div>
+                    <h3>Autofill Rules</h3>
+                    <p class="section-copy">Review saved automation rules with the same compact dashboard layout.</p>
+                  </div>
+                </div>
+                <div class="button-group">
+                  <button class="primary-btn" id="rule-new-btn">New Rule</button>
+                </div>
+              </div>
+
+              <div class="admin-filter-bar">
+                <label>Search<input id="rule-search" type="search" placeholder="Name or site" autocomplete="off"></label>
+                <label>Status
+                  <select id="rule-status-filter">
+                    <option value="all">All</option>
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                  </select>
+                </label>
+                <div class="button-group" id="rule-bulk-actions">
+                  <button class="secondary-btn" id="rule-enable-selected-btn">Enable</button>
+                  <button class="secondary-btn" id="rule-disable-selected-btn">Pause</button>
+                  <button class="danger-btn" id="rule-delete-selected-btn">Delete</button>
+                </div>
+              </div>
+
+              <div id="rules-table-container" class="admin-table-scroll">
+                <table class="admin-data-table">
+                  <thead>
+                    <tr>
+                      <th class="select-col"><input id="rule-select-all" type="checkbox" aria-label="Select visible rules"></th>
+                      <th>Rule / Purpose</th>
+                      <th>Site / Access</th>
+                      <th>Status</th>
+                      <th>Selectors</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rules-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <!-- Editor View (Hidden by default) -->
+          <div id="rules-editor-view" class="is-hidden">
+            <section class="surface">
+              <div class="section-head">
+                <h3>Rule Editor</h3>
+                <button class="secondary-btn" id="rule-back-btn">Back</button>
+              </div>
+              <div class="editor-grid">
+                <input type="hidden" id="rule-id">
+                <label>Name<input id="rule-name" type="text" autocomplete="off"></label>
+                <label>Domain Match<input id="rule-domain" type="text" placeholder="example.com" autocomplete="off"></label>
+                <label>Profile
+                  <select id="rule-profile-id">
+                    <option value="default">Global</option>
+                  </select>
+                </label>
+                <div class="setting-row field-switch-row">
+                  <div class="setting-info">
+                    <span class="setting-title">Rule Active</span>
+                  </div>
+                  <label class="switch">
+                    <input id="rule-enabled" type="checkbox">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section class="surface edge-to-edge-surface">
+              <div class="section-head padded flush">
+                <h3>Execution Steps</h3>
+                <div class="button-group">
+                  <button class="secondary-btn" id="pick-selector-btn">Pick Selector</button>
+                  <button class="secondary-btn" id="rule-add-step-btn">Add Step</button>
+                </div>
+              </div>
+              <div class="table-responsive has-top-border">
+                <table class="autofill-steps-table">
+                  <thead>
+                    <tr>
+                      <th class="col-icon"></th>
+                      <th class="col-type">Type</th>
+                      <th>Name / Selector</th>
+                      <th>Value</th>
+                      <th class="col-site">Site Match</th>
+                      <th class="col-actions">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rule-steps-container">
+                    <!-- Steps go here -->
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <div class="action-row">
+                  <button class="primary-btn" id="rule-save-btn">Save Rule</button>
+                  <button class="danger-btn" id="rule-delete-btn">Delete Rule</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Profiles Panel -->
+        <section class="panel" id="profiles-panel" data-title="Profiles">
+          <section class="surface">
+            <div class="section-head">
+              <div>
+                <h3>Profiles</h3>
+                <p class="section-copy">Profiles group Autofill rules, userscripts, and CAPTCHA routes into separate workspaces.</p>
+              </div>
+              <div class="button-group">
+                <button class="secondary-btn" id="profile-new-btn">New Profile</button>
+              </div>
+            </div>
+            <div class="editor-grid">
+              <input type="hidden" id="profile-id">
+              <label>Profile Name<input id="profile-name" type="text" placeholder="e.g. Work, Personal" autocomplete="off"></label>
+              <label>Active Profile
+                <select id="active-profile-id">
+                  <option value="default">Global</option>
+                </select>
+              </label>
+            </div>
+            <div class="profile-scope-strip">
+              <div>
+                <span class="setting-title" id="active-profile-name">Global</span>
+                <span class="setting-desc" id="active-profile-summary">0 rules | 0 scripts | 0 CAPTCHA routes</span>
+              </div>
+            </div>
+            <div class="action-row">
+              <button class="primary-btn" id="profile-save-btn">Save Profile</button>
+              <button class="danger-btn" id="profile-delete-btn">Delete</button>
+            </div>
+          </section>
+          <section class="surface table-surface">
+            <table class="admin-data-table">
+              <thead><tr><th>Profile</th><th>Automation</th><th>Actions</th></tr></thead>
+              <tbody id="profiles-table"></tbody>
+            </table>
+          </section>
+          <section class="surface admin-table-surface profile-items-surface is-hidden" id="profile-items-surface">
+            <div class="admin-panel-head">
+              <div class="admin-title-wrap">
+                <span class="admin-icon">PF</span>
+                <div>
+                  <h3 id="profile-items-title">Profile Automations</h3>
+                  <p class="section-copy">Clone saved automations to another profile or remove them from this profile only.</p>
+                </div>
+              </div>
+            </div>
+            <div class="admin-filter-bar profile-bulk-bar">
+              <span class="profile-selection-summary" id="profile-items-selection-summary">0 selected</span>
+              <label>Clone Selected To
+                <select id="profile-bulk-clone-target"></select>
+              </label>
+              <div class="button-group">
+                <button class="secondary-btn" id="profile-clone-selected-btn">Clone Selected</button>
+                <button class="danger-btn" id="profile-remove-selected-btn">Remove Selected</button>
+              </div>
+            </div>
+            <div class="admin-table-scroll">
+              <table class="admin-data-table">
+                <thead>
+                  <tr>
+                    <th class="select-col"><input id="profile-item-select-all" type="checkbox" aria-label="Select visible profile automations"></th>
+                    <th>Title</th>
+                    <th>Clone To</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="profile-items-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- Userscript Panel -->
+        <section class="panel" id="scripts-panel" data-title="Userscript">
+          <section class="surface admin-table-surface scripts-library-surface">
+            <div class="admin-panel-head">
+              <div class="admin-title-wrap">
+                <span class="admin-icon">JS</span>
+              <div>
+                  <h3>Userscript Management</h3>
+                  <p class="section-copy">Install, pause, refresh, or remove scripts for the active profile.</p>
+                </div>
+              </div>
+              <div class="button-group">
+                <button class="secondary-btn" id="script-update-all-btn">Update Scripts</button>
+                <button class="primary-btn" id="script-new-btn">New Script</button>
+              </div>
+            </div>
+            <div class="script-direct-import">
+              <input id="script-import-url-input" type="url" placeholder="Paste GreasyFork or .user.js URL" autocomplete="off">
+              <button class="secondary-btn" id="script-import-direct-btn">Import Script</button>
+            </div>
+            <div class="config-status" id="script-runtime-status" role="status"></div>
+          </section>
+          <section class="surface userscript-install-review is-hidden" id="script-install-review-card">
+            <div class="admin-panel-head">
+              <div class="admin-title-wrap">
+                <span class="admin-icon">IN</span>
+                <div>
+                  <h3>Review Userscript Install</h3>
+                  <p class="section-copy">Confirm this user-provided script before EazyFill runs it.</p>
+                </div>
+              </div>
+            </div>
+            <div id="script-install-review-body"></div>
+            <div class="action-row tight-top">
+              <button class="primary-btn" id="script-install-confirm-btn">Install Script</button>
+              <button class="secondary-btn" id="script-install-cancel-btn">Cancel</button>
+            </div>
+          </section>
+          <section class="surface userscript-surface is-hidden" id="script-editor-card">
+            <div class="userscript-header">
+              <span class="userscript-icon">S</span>
+              <h4 class="userscript-title" id="script-editor-title">&lt;New userscript&gt;</h4>
+              <div class="flex-spacer"></div>
+              <div class="userscript-editor-settings">
+                <label for="script-font-size" class="editor-font-label">Font Size</label>
+                <select id="script-font-size" class="autofill-select editor-font-select">
+                  <option value="12px">12px</option>
+                  <option value="14px" selected>14px</option>
+                  <option value="16px">16px</option>
+                  <option value="18px">18px</option>
+                </select>
+                <button class="secondary-btn fullscreen-button" id="script-fullscreen-btn" title="Toggle Fullscreen">
+                  <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" class="fullscreen-icon"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+                </button>
+                <button class="secondary-btn fullscreen-button" id="script-editor-close-btn" title="Close editor" aria-label="Close editor">&times;</button>
+              </div>
+            </div>
+            <div class="surface-body">
+              <div class="editor-grid script-fields">
+                <label>Name<input id="script-name" type="text" autocomplete="off"></label>
+                <label>Version<input id="script-version" type="text" placeholder="1.0.0" autocomplete="off"></label>
+                <label>Match<input id="script-match" type="text" placeholder="https://example.com/*" autocomplete="off"></label>
+                <label>Profile
+                  <select id="script-profile-id">
+                    <option value="default">Global</option>
+                  </select>
+                </label>
+                <div class="setting-row field-switch-row">
+                  <div class="setting-info">
+                    <span class="setting-title">Script Active</span>
+                  </div>
+                  <label class="switch">
+                    <input id="script-enabled" type="checkbox">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="editor-grid script-source-fields">
+                <label>Source URL<input id="script-source-url" type="url" placeholder="https://example.com/script.user.js" autocomplete="off"></label>
+              </div>
+              <label class="code-field">Code<div id="script-editor-container"></div></label>
+              <div class="config-status status-spaced" id="script-meta-preview" role="status"></div>
+              <div class="action-row tight-top">
+                <button class="primary-btn" id="script-save-btn">Save Script</button>
+                <button class="secondary-btn" id="script-import-url-btn">Import URL</button>
+                <button class="secondary-btn" id="script-discard-btn">Discard</button>
+              </div>
+            </div>
+          </section>
+          <section class="surface admin-table-surface">
+            <div class="admin-table-scroll userscripts-scroll">
+            <table class="admin-data-table userscripts-table">
+              <thead><tr><th>On</th><th>Name</th><th>Ver.</th><th>Size</th><th>Sites</th><th>Features</th><th>Updated</th><th>Actions</th></tr></thead>
+              <tbody id="scripts-table"></tbody>
+            </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- CAPTCHA Panel -->
+        <section class="panel" id="captcha-panel" data-title="CAPTCHA">
+          <section class="surface captcha-behavior-surface">
+            <div class="section-head">
+              <div>
+                <h3>Autosolve Behavior</h3>
+                <p class="section-copy">These settings apply to every configured CAPTCHA route.</p>
+              </div>
+              <button class="primary-btn" id="captcha-save-behavior-btn">Save Behavior</button>
+            </div>
+            <div class="behavior-grid">
+              <label class="behavior-card">Fill Delay
+                <span class="setting-desc">Wait before writing the solved answer.</span>
+                <input id="captcha-fill-delay" type="number" min="0" max="30000" step="100" value="200" inputmode="numeric">
+              </label>
+              <div class="behavior-card switch-card">
+                <div class="setting-info">
+                  <span class="setting-title">Human-like Typing</span>
+                  <span class="setting-desc">Type solved answers character by character instead of pasting</span>
+                </div>
+                <label class="switch">
+                  <input id="captcha-human-typing" type="checkbox" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="behavior-card switch-card">
+                <div class="setting-info">
+                  <span class="setting-title">Route Learning Consent</span>
+                  <span class="setting-desc">Send CAPTCHA samples and typed answers when saving routes to help support this site</span>
+                </div>
+                <label class="switch">
+                  <input id="captcha-learning-consent" type="checkbox" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+          </section>
+          <section class="surface captcha-editor-surface">
+            <div class="admin-panel-head">
+              <div class="admin-title-wrap">
+                <span class="admin-icon">CA</span>
+                <div>
+                  <h3 id="captcha-editor-title">Record CAPTCHA Route</h3>
+                  <p class="section-copy">Create or edit the field mapping used by autosolve.</p>
+                </div>
+              </div>
+              <div class="button-group">
+                <button class="primary-btn" id="captcha-save-config-btn">Save Config</button>
+                <button class="secondary-btn" id="captcha-new-route-btn">New Route</button>
+              </div>
+            </div>
+            <div class="editor-grid captcha-route-grid">
+              <input type="hidden" id="captcha-domain-orig">
+              <label>Domain<input id="captcha-domain" type="text" placeholder="example.com" autocomplete="off"></label>
+              <label>Profile
+                <select id="captcha-profile-id">
+                  <option value="default">Global</option>
+                </select>
+              </label>
+              <label>Field Name<input id="captcha-field-name" type="text" placeholder="Generated when empty" autocomplete="off"></label>
+              <label>Source Selector<input id="captcha-source-selector" type="text" autocomplete="off"></label>
+              <label>Target Selector<input id="captcha-target-selector" type="text" autocomplete="off"></label>
+              <div class="setting-row field-switch-row captcha-auto-card">
+                <div class="setting-info">
+                  <span class="setting-title">Auto Solve</span>
+                  <span class="setting-desc">Solve when the configured CAPTCHA appears</span>
+                </div>
+                <label class="switch">
+                  <input id="captcha-auto-solve" type="checkbox">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="action-row">
+              <button class="secondary-btn" id="captcha-pick-source-btn">Pick Source</button>
+              <button class="secondary-btn" id="captcha-pick-target-btn">Pick Target</button>
+            </div>
+          </section>
+          <section class="surface admin-table-surface captcha-routes-surface">
+            <div class="admin-panel-head">
+              <div class="admin-title-wrap">
+                <span class="admin-icon">RT</span>
+                <div>
+                  <h3>Saved CAPTCHA Routes</h3>
+                  <p class="section-copy">Full route inventory with selectors, status, and approval resubmit controls.</p>
+                </div>
+              </div>
+            </div>
+            <div class="admin-filter-bar">
+              <label>Search<input id="captcha-search" type="search" placeholder="Domain or selector" autocomplete="off"></label>
+            </div>
+            <div class="admin-table-scroll with-top-space">
+            <table class="admin-data-table">
+              <thead><tr><th>Domain</th><th>Field / Task</th><th>Source Selector</th><th>Target Selector</th><th>Mode</th><th>Actions</th></tr></thead>
+              <tbody id="captcha-configs-table"></tbody>
+            </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- Settings Panel -->
+        <section class="panel" id="settings-panel" data-title="Settings">
+          <section class="surface">
+            <div class="section-head">
+              <h3>Extension Settings</h3>
+              <button class="primary-btn" id="settings-save-btn">Save Settings</button>
+            </div>
+            <div class="editor-grid">
+              <label>API Base URL<input id="setting-api-base" type="url" autocomplete="off"></label>
+              <label>Theme
+                <select id="setting-theme">
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
+            </div>
+
+            <h4 class="micro-section-title">Enabled Features</h4>
+            <div class="features-list">
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-title">CAPTCHA Auto-solving</span>
+                  <span class="setting-desc">Auto-solve standard text and image CAPTCHAs</span>
+                </div>
+                <label class="switch">
+                  <input id="setting-captcha" type="checkbox">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-title">Autofill Engines</span>
+                  <span class="setting-desc">Automatically detect and autofill matching form fields</span>
+                </div>
+                <label class="switch">
+                  <input id="setting-autofill" type="checkbox">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-title">Userscript Manager</span>
+                  <span class="setting-desc">Run custom userscripts on matching domains</span>
+                </div>
+                <label class="switch">
+                  <input id="setting-userscripts" type="checkbox">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="setting-row" id="sync-panel-anchor">
+                <div class="setting-info">
+                  <span class="setting-title">Cloud Synchronization</span>
+                  <span class="setting-desc">Allow sync actions from the dedicated Sync page</span>
+                </div>
+                <label class="switch">
+                  <input id="setting-sync" type="checkbox">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- Account Panel -->
+        <section class="panel" id="account-panel" data-title="Account & Plan">
+          <section class="surface account-hero-surface">
+            <div class="account-hero-grid">
+              <div>
+                <p class="eyebrow">Account & Plan</p>
+                <h3>Start free, then upgrade only when usage needs it.</h3>
+                <p class="account-help">One account keeps credits, billing, devices, and cloud sync together.</p>
+              </div>
+              <dl class="stat-grid account-summary-grid">
+                <div class="stat-card">
+                  <dt class="stat-title">Status</dt>
+                  <dd id="account-summary-status" class="stat-value">Disconnected</dd>
+                </div>
+                <div class="stat-card">
+                  <dt class="stat-title">Plan</dt>
+                  <dd id="account-summary-plan" class="stat-value">Free Tier</dd>
+                </div>
+                <div class="stat-card">
+                  <dt class="stat-title">Credits</dt>
+                  <dd id="account-summary-credits" class="stat-value">0 / 0</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+          <section class="surface account-setup-surface" id="account-disconnected-view">
+            <div class="section-head account-section-head">
+              <div>
+                <h3>Create your account</h3>
+                <p class="section-copy">Use email verification to sign in or create a new account.</p>
+              </div>
+            </div>
+            <div class="account-grid account-grid-simple">
+              <div class="account-column">
+                <div class="form-stack">
+                  <label class="form-label">
+                    Name
+                    <input id="options-signup-name" type="text" placeholder="Your name" class="autofill-input full-width-input" autocomplete="name" required>
+                  </label>
+                  <label class="form-label">
+                    Email
+                    <input id="options-signup-identifier" type="email" placeholder="you@gmail.com" class="autofill-input full-width-input" autocomplete="email" required>
+                  </label>
+                  <div class="otp-actions">
+                    <button id="options-send-otp-btn" class="primary-btn otp-action-button">Continue with Email</button>
+                  </div>
+                  <label class="form-label">
+                    Verification Code
+                    <input id="options-signup-otp" type="text" inputmode="numeric" placeholder="6-digit code" class="autofill-input full-width-input" disabled autocomplete="one-time-code">
+                  </label>
+                  <button id="options-verify-otp-btn" class="secondary-btn otp-action-button" disabled>Verify Code</button>
+                  <p id="options-signup-message" class="inline-message"></p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="surface account-connected-surface is-hidden" id="account-connected-view">
+            <div class="section-head account-section-head">
+              <div>
+                <h3>Account connected</h3>
+                <p class="section-copy">Your plan, credits, and device status are active on this browser.</p>
+              </div>
+              <button class="danger-btn small-danger-button" id="logout-btn" type="button" aria-label="Sign out of EazyFill">Sign out</button>
+            </div>
+            <dl class="activity-list stat-grid">
+              <div class="stat-card">
+                <dt class="stat-title">User</dt>
+                <dd id="account-user" class="stat-value">--</dd>
+              </div>
+              <div class="stat-card">
+                <dt class="stat-title">Active Plan</dt>
+                <dd id="account-plan" class="stat-value">--</dd>
+              </div>
+              <div class="stat-card">
+                <dt class="stat-title">Device</dt>
+                <dd id="account-device" class="stat-value">--</dd>
+              </div>
+              <div class="stat-card">
+                <dt class="stat-title">Expires</dt>
+                <dd id="account-expires" class="stat-value">--</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="surface account-plans-surface" id="account-plans-surface">
+            <div class="section-head">
+              <div>
+                <h3>Upgrade Options</h3>
+                <p class="section-copy">Pick a plan when you need more credits, devices, priority solving, or cloud sync.</p>
+              </div>
+              <button class="secondary-btn" id="billing-refresh-btn">Refresh</button>
+            </div>
+            <div class="plan-grid" id="plans-grid"></div>
+          </section>
+
+          <section class="surface account-credit-packs-surface is-hidden" id="credit-packs-surface">
+            <div class="section-head">
+              <h3>Credit Packs</h3>
+            </div>
+            <div class="plan-grid" id="credits-grid"></div>
+          </section>
+
+          <details class="surface account-history-surface" id="billing-history-surface">
+            <summary class="details-summary">Usage and payment history</summary>
+            <section class="table-surface embedded-table-surface">
+              <div class="section-head table-head padded-top">
+                <h3>Usage History</h3>
+              </div>
+              <table>
+                <thead><tr><th>Cycle</th><th>Used</th><th>Limit</th><th>Remaining</th><th>Status</th></tr></thead>
+                <tbody id="usage-history-table"></tbody>
+              </table>
+            </section>
+            <section class="table-surface embedded-table-surface">
+              <div class="section-head table-head padded-top">
+                <h3>Payment History</h3>
+              </div>
+              <table>
+                <thead><tr><th>Payment</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead>
+                <tbody id="payments-table"></tbody>
+              </table>
+            </section>
+          </details>
+        </section>
+
+        <!-- Sync Panel -->
+        <section class="panel" id="sync-panel" data-title="Sync">
+          <section class="surface">
+            <div class="section-head">
+              <h3>Cloud Sync</h3>
+              <button class="secondary-btn" id="sync-refresh-btn">Refresh</button>
+            </div>
+            <dl class="activity-list stat-grid with-bottom-space">
+              <div class="stat-card">
+                <dt class="stat-title">Status</dt>
+                <dd id="sync-status" class="stat-value">Off</dd>
+              </div>
+              <div class="stat-card">
+                <dt class="stat-title">Last Sync</dt>
+                <dd id="sync-last" class="stat-value">--</dd>
+              </div>
+              <div class="stat-card">
+                <dt class="stat-title">Backup Size</dt>
+                <dd id="sync-size" class="stat-value">0 B</dd>
+              </div>
+            </dl>
+            <div class="action-row">
+              <button class="secondary-btn" id="sync-push-btn">Push</button>
+              <button class="secondary-btn" id="sync-pull-btn">Pull</button>
+              <button class="danger-btn" id="sync-delete-btn">Delete Cloud Copy</button>
+            </div>
+          </section>
+
+          <section class="surface">
+            <div class="section-head">
+              <h3>Import / Export</h3>
+              <div class="button-group">
+                <button class="secondary-btn" id="backup-export-btn">Export Data</button>
+                <button class="secondary-btn" id="backup-restore-btn">Import Data</button>
+              </div>
+            </div>
+            <p class="local-backup-copy" id="local-backup-status">Export EazyFill data or import shared data into a new profile.</p>
+          </section>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Command Palette Modal -->
+  <div class="cmd-overlay is-hidden" id="cmd-overlay">
+    <div class="cmd-modal">
+      <div class="cmd-search-wrapper">
+        <svg class="cmd-search-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="cmd-input" placeholder="Type a command or search settings..." autocomplete="off">
+        <kbd class="cmd-esc-hint">ESC</kbd>
+      </div>
+      <div class="cmd-results" id="cmd-results">
+        <!-- Results will be dynamically populated -->
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input id="backup-restore-file" type="file" accept=".eazyfill,application/octet-stream" hidden>
+  <script src="../lib/codemirror-bundle.js"></script>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EazyFill Admin Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#08020F] text-gray-100 font-sans flex items-center justify-center min-h-screen p-4">
+    <div class="bg-[#12052B] rounded-lg border border-white/10 shadow-2xl shadow-purple-950/40 p-8 max-w-md w-full">
+        <img src="/static/brand/dashboard-login-logo-dark-bg.png" alt="EazyFill" class="h-20 w-auto mb-5">
+        <h1 class="text-2xl font-bold mb-2 text-white">Admin Login</h1>
+        <p class="text-sm text-gray-400 mb-6">Sign in using admin username/password.</p>
+        {% if error %}
+        <div class="mb-4 text-sm text-red-300 bg-red-900/30 border border-red-700 rounded px-3 py-2">{{ error }}</div>
+        {% endif %}
+        <form action="/admin/login" method="post" class="space-y-4">
+            {% if enable_password_login %}
+            <div>
+                <label for="admin_username" class="block text-sm text-gray-300 mb-1">Username</label>
+                <input id="admin_username" name="admin_username" type="text" class="w-full bg-[#08020F] border border-white/10 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-[#A83AFB] focus:border-[#A83AFB] focus:outline-none" />
+            </div>
+            <div>
+                <label for="admin_password" class="block text-sm text-gray-300 mb-1">Password</label>
+                <input id="admin_password" name="admin_password" type="password" class="w-full bg-[#08020F] border border-white/10 rounded-md py-2 px-3 text-sm focus:ring-2 focus:ring-[#A83AFB] focus:border-[#A83AFB] focus:outline-none" />
+            </div>
+            {% endif %}
+
+            <button type="submit" class="w-full bg-gradient-to-r from-[#8B5CF6] via-[#A83AFB] to-[#FF5FB8] hover:brightness-110 text-white py-2 px-4 rounded-md text-sm font-medium shadow-lg shadow-purple-950/30">Sign In</button>
+        </form>
+    </div>
+</body>
+</html>

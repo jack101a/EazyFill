@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="EazyFill browser productivity tools">
+  <title>EazyFill</title>
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-copy">
+          <img id="brand-logo" class="brand-logo" src="../brand/logo-dark.png" alt="EazyFill">
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="theme-toggle" class="icon-button theme-button" type="button" aria-label="Toggle theme" title="Toggle theme">
+          <svg class="theme-icon sun-icon is-hidden" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.22" x2="5.64" y2="17.78"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          <svg class="theme-icon moon-icon" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        </button>
+        <button id="power-toggle" class="icon-button power-button" type="button" aria-label="Turn extension off" title="Turn extension off" aria-pressed="true">
+          <svg class="power-icon" aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"></path><path d="M18.4 6.6a9 9 0 1 1-12.8 0"></path></svg>
+        </button>
+      </div>
+    </header>
+
+    <section id="credit-progress-container" class="credits-panel" hidden>
+      <div class="eyebrow">Credits</div>
+      <div class="credits-line">
+        <strong><span id="credit-remaining">--</span></strong>
+        <span>/ <span id="credit-limit">--</span> remaining</span>
+      </div>
+      <div class="credit-track" aria-hidden="true">
+        <div id="credit-progress-bar" class="credit-progress-bar"></div>
+      </div>
+      <p id="credit-progress-text" class="credit-progress-text">-- used</p>
+    </section>
+
+    <main>
+      <section id="unavailable-view" class="view" aria-labelledby="unavailable-title">
+        <div class="state-panel">
+          <div class="state-icon" aria-hidden="true">!</div>
+          <h2 id="unavailable-title">Extension unavailable</h2>
+          <p id="unavailable-message">EazyFill's background service is not responding.</p>
+          <button id="retry-status" class="button primary full-width" type="button">Retry</button>
+        </div>
+      </section>
+
+      <section id="app-view" class="view" aria-label="EazyFill controls">
+        <div id="alert" class="alert" hidden role="status" aria-live="polite"></div>
+
+        <section id="popup-auth-panel" class="auth-panel" hidden aria-labelledby="popup-auth-title">
+          <div class="auth-head">
+            <div>
+              <div class="eyebrow">Account</div>
+              <h2 id="popup-auth-title">Sign in</h2>
+            </div>
+            <button id="popup-auth-close" class="mini-icon-button" type="button" aria-label="Close account login" title="Close">
+              <span aria-hidden="true"></span>
+            </button>
+          </div>
+          <div class="auth-form">
+            <label>
+              Name
+              <input id="popup-auth-name" type="text" placeholder="Your name" autocomplete="name" required>
+            </label>
+            <label>
+              Email
+              <input id="popup-auth-email" type="email" placeholder="you@gmail.com" autocomplete="email" required>
+            </label>
+            <div class="auth-actions">
+              <button id="popup-send-otp" class="button primary" type="button">Continue</button>
+            </div>
+            <label>
+              Verification code
+              <input id="popup-auth-otp" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" disabled>
+            </label>
+            <button id="popup-verify-otp" class="button secondary full-width" type="button" disabled>Verify</button>
+            <p id="popup-auth-message" class="auth-message" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <div id="simple-app-controls" class="simple-controls" hidden></div>
+
+        <div id="advanced-app-controls" class="module-stack">
+          <section class="module-card" data-module="autofill">
+            <div class="module-row">
+              <button id="simple-autofill-btn" class="module-copy" type="button">
+                <span class="module-title" data-button-label>Autofill Rules</span>
+                <span id="autofill-status" class="module-subtitle">No matching rules</span>
+              </button>
+              <label class="switch" aria-label="Toggle autofill">
+                <input id="toggle-autofill" type="checkbox">
+                <span></span>
+              </label>
+              <button class="chevron-button" type="button" data-module-toggle="autofill" aria-expanded="false" aria-controls="autofill-detail" title="Autofill details">
+                <span aria-hidden="true"></span>
+              </button>
+            </div>
+            <div id="autofill-detail" class="module-detail" hidden>
+              <div class="detail-head">
+                <h3>Autofill Recorder</h3>
+                <p id="popup-recorder-status">Ready to record new rule</p>
+              </div>
+              <div class="actions">
+                <button id="record-rule" class="button primary" type="button">Record</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="module-card" data-module="captcha">
+            <div class="module-row">
+              <button id="simple-solve-captcha-btn" class="module-copy" type="button">
+                <span class="module-title" data-button-label>Autosolve Captcha</span>
+                <span id="captcha-status" class="module-subtitle">Idle</span>
+              </button>
+              <label class="switch" aria-label="Toggle CAPTCHA">
+                <input id="toggle-captcha" type="checkbox">
+                <span></span>
+              </label>
+              <button class="chevron-button" type="button" data-module-toggle="captcha" aria-expanded="false" aria-controls="captcha-detail" title="CAPTCHA route setup">
+                <span aria-hidden="true"></span>
+              </button>
+            </div>
+            <div id="captcha-detail" class="module-detail route-detail" hidden>
+              <div class="detail-head">
+                <h3>Route Locator</h3>
+                <p>Pick source and target on the current page, then save.</p>
+              </div>
+              <div class="route-row">
+                <span>Source</span>
+                <input id="popup-captcha-source" type="text" placeholder="#captcha" readonly>
+                <button id="popup-captcha-source-pick" class="button quiet route-pick" type="button">Pick</button>
+              </div>
+              <div class="route-row">
+                <span>Target</span>
+                <input id="popup-captcha-target" type="text" placeholder="#answer" readonly>
+                <button id="popup-captcha-target-pick" class="button quiet route-pick" type="button">Pick</button>
+              </div>
+              <div class="actions">
+                <button id="configure-captcha" class="button primary" type="button">Save Route</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="module-card" data-module="scripts">
+            <div class="module-row">
+              <button id="manage-scripts" class="module-copy" type="button">
+                <span class="module-title" data-button-label>Userscript</span>
+                <span id="scripts-status" class="module-subtitle">0 EazyFill active</span>
+              </button>
+              <label class="switch" aria-label="Toggle userscripts">
+                <input id="toggle-scripts" type="checkbox">
+                <span></span>
+              </label>
+              <button class="chevron-button" type="button" data-module-toggle="scripts" aria-expanded="false" aria-controls="scripts-detail" title="Current userscripts">
+                <span aria-hidden="true"></span>
+              </button>
+            </div>
+            <div id="scripts-detail" class="module-detail scripts-detail" hidden>
+              <div id="popup-scripts-list" class="popup-scripts-list"></div>
+            </div>
+          </section>
+
+          <section class="module-card sync-card" data-module="sync">
+            <div class="module-row">
+              <div class="module-copy account-copy">
+                <span class="module-title">Cloud Sync</span>
+                <span id="popup-sync-status" class="module-subtitle">Status: Off</span>
+              </div>
+              <label class="switch" aria-label="Toggle sync">
+                <input id="popup-toggle-sync" type="checkbox">
+                <span></span>
+              </label>
+            </div>
+            <div class="actions two compact">
+              <button id="popup-sync-push" class="button secondary" type="button">Push</button>
+              <button id="popup-sync-pull" class="button quiet" type="button">Pull</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button id="account-link" class="footer-account-link" type="button">
+        <span id="account-link-copy">Log in to sync data or upgrade usage</span>
+        <span class="footer-account-arrow" aria-hidden="true"></span>
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

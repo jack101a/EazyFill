@@ -1,0 +1,42 @@
+# NOTE: All file paths in this config are relative to the backend/ directory.
+# The server must be started from the backend/ directory or paths will resolve incorrectly.
+app_name: eazyfill
+server:
+  host: 0.0.0.0
+  port: 8080
+  debug: false
+  cors_origins:
+  - moz-extension://*
+  - chrome-extension://*
+  cors_origin_regex: ^(moz-extension|chrome-extension)://.*$
+auth:
+  key_prefix: fp_
+  key_length: 32
+  default_expiry_days: 90
+  hash_salt: ''
+  admin_token: ''
+  admin_username: admin
+  admin_password: ''
+rate_limit:
+  requests_per_minute: 60
+  burst: 10
+queue:
+  workers: 4
+  max_pending_jobs: 500
+  cache_ttl_seconds: 300
+logging:
+  level: INFO
+  debug: false
+  json: true
+model:
+  default: onnx
+  fallback: onnx
+  allow_future_model: false
+  onnx_path: data/models/model.onnx
+  onnx_vocab: 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+  onnx_height: 54
+  onnx_width: 250
+storage:
+  sqlite_path: backend/logs/app.db
+retrain:
+  worker_enabled: false

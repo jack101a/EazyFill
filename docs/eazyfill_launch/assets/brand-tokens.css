@@ -1,0 +1,11 @@
+:root {
+  --eazyfill-ink: #0B1020;
+  --eazyfill-night: #12052B;
+  --eazyfill-violet: #8B5CF6;
+  --eazyfill-purple: #A83AFB;
+  --eazyfill-magenta: #F040C8;
+  --eazyfill-pink: #FF5FB8;
+  --eazyfill-paper: #F8F7FC;
+  --eazyfill-success: #24D18F;
+  --eazyfill-gradient: linear-gradient(135deg, #8B5CF6 0%, #A83AFB 48%, #FF5FB8 100%);
+}

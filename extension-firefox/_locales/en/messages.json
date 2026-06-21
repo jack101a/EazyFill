@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "EazyFill",
+    "description": "Extension name"
+  },
+  "extensionDescription": {
+    "message": "CAPTCHA solving, form autofill, and userscript tools for browser productivity",
+    "description": "Extension description"
+  }
+}

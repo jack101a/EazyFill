@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+      - flowpilot
+      - production
+  pull_request:
+    branches:
+      - main
+      - master
+      - production
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: Run backend tests
+        env:
+          AUTH_HASH_SALT: test-salt
+          ADMIN_TOKEN: test-token
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin
+          APP_ENV: test
+        run: pytest tests/ -q --tb=short
+
+  extension-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check extension scripts
+        run: |
+          node --check extension/background/service-worker.js
+          node --check extension/popup/popup.js
+          node --check extension/options/options.js
+          node --check extension-firefox/background/service-worker.js
+          node --check extension-firefox/popup/popup.js
+          node --check extension-firefox/options/options.js
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Docker Compose config
+        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+
+      - name: Build Docker image
+        run: docker build -t eazyfill:ci .
+
+      - name: Smoke health endpoint
+        run: |
+          docker run -d --name eazyfill-ci \
+            -e AUTH_HASH_SALT=test \
+            -e ADMIN_TOKEN=test \
+            -e ADMIN_USERNAME=admin \
+            -e ADMIN_PASSWORD=admin \
+            -e APP_ENV=test \
+            -p 8080:8080 eazyfill:ci
+          sleep 12
+          curl -sf http://localhost:8080/health || (docker logs eazyfill-ci && exit 1)
+          docker stop eazyfill-ci

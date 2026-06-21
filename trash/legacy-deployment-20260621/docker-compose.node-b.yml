@@ -1,0 +1,392 @@
+x-node-b-env: &node_b_env
+  TZ: ${TZ}
+  APP_CONFIG_PATH: ${APP_CONFIG_PATH}
+  APP_MODE: ${APP_MODE}
+  APP_ENV: ${APP_ENV}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+  RUN_MIGRATIONS: ${RUN_MIGRATIONS}
+  RUN_BACKGROUND_TASKS: ${RUN_BACKGROUND_TASKS}
+  DB_TYPE: ${DB_TYPE}
+  LEGACY_DB_TYPE: ${LEGACY_DB_TYPE}
+  POSTGRES_HOST: ${PGHOST}
+  POSTGRES_PORT: ${PGPORT}
+  POSTGRES_DB: ${PGDATABASE}
+  POSTGRES_USER: ${PGUSER}
+  POSTGRES_PASSWORD: ${PGPASSWORD}
+  REDIS_ENABLED: ${REDIS_ENABLED}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
+  REDIS_PREFIX: ${REDIS_PREFIX}
+  SOLVER_QUEUE_BACKEND: ${SOLVER_QUEUE_BACKEND}
+  SOLVER_QUEUE_FALLBACK_LOCAL: ${SOLVER_QUEUE_FALLBACK_LOCAL}
+  SOLVER_JOB_TIMEOUT_SECONDS: ${SOLVER_JOB_TIMEOUT_SECONDS}
+  SOLVER_JOB_ATTEMPTS: ${SOLVER_JOB_ATTEMPTS}
+  SOLVER_RESULT_TTL_SECONDS: ${SOLVER_RESULT_TTL_SECONDS}
+  AUTH_HASH_SALT: ${AUTH_HASH_SALT}
+  ADMIN_TOKEN: ${ADMIN_TOKEN}
+  ADMIN_USERNAME: ${ADMIN_USERNAME}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+  RAZORPAY_ORDER_TOKEN: ${RAZORPAY_ORDER_TOKEN}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+  DISCORD_NOTIFY_ENABLED: ${DISCORD_NOTIFY_ENABLED}
+  FAILOVER_MODE_FILE: ${FAILOVER_MODE_FILE:-/var/lib/sa-helper/failover-mode.json}
+
+x-node-b-emergency-env: &node_b_emergency_env
+  TZ: ${TZ}
+  APP_CONFIG_PATH: ${APP_CONFIG_PATH}
+  APP_MODE: emergency
+  APP_ENV: ${APP_ENV}
+  PUBLIC_BASE_URL: ${EMERGENCY_PUBLIC_BASE_URL}
+  RUN_MIGRATIONS: "false"
+  RUN_BACKGROUND_TASKS: "false"
+  DB_TYPE: ${DB_TYPE}
+  LEGACY_DB_TYPE: ${LEGACY_DB_TYPE}
+  POSTGRES_HOST: ${EMERGENCY_PGHOST}
+  POSTGRES_PORT: ${EMERGENCY_PGPORT}
+  POSTGRES_DB: ${EMERGENCY_PGDATABASE}
+  POSTGRES_USER: ${EMERGENCY_PGUSER}
+  POSTGRES_PASSWORD: ${EMERGENCY_PGPASSWORD}
+  REDIS_ENABLED: ${REDIS_ENABLED}
+  REDIS_URL: redis://:${EMERGENCY_REDIS_PASSWORD}@${EMERGENCY_REDIS_HOST}:${EMERGENCY_REDIS_PORT}/0
+  REDIS_PREFIX: ${EMERGENCY_REDIS_PREFIX}
+  SOLVER_QUEUE_BACKEND: ${SOLVER_QUEUE_BACKEND}
+  SOLVER_QUEUE_FALLBACK_LOCAL: ${SOLVER_QUEUE_FALLBACK_LOCAL}
+  SOLVER_JOB_TIMEOUT_SECONDS: ${SOLVER_JOB_TIMEOUT_SECONDS}
+  SOLVER_JOB_ATTEMPTS: ${EMERGENCY_SOLVER_JOB_ATTEMPTS}
+  SOLVER_RESULT_TTL_SECONDS: ${SOLVER_RESULT_TTL_SECONDS}
+  AUTH_HASH_SALT: ${AUTH_HASH_SALT}
+  ADMIN_TOKEN: ${ADMIN_TOKEN}
+  ADMIN_USERNAME: ${ADMIN_USERNAME}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  RAZORPAY_KEY_ID: ""
+  RAZORPAY_KEY_SECRET: ""
+  RAZORPAY_WEBHOOK_SECRET: ""
+  RAZORPAY_ORDER_TOKEN: ""
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+  DISCORD_NOTIFY_ENABLED: ${DISCORD_NOTIFY_ENABLED}
+  FAILOVER_MODE_FILE: ${FAILOVER_MODE_FILE:-/var/lib/sa-helper/failover-mode.json}
+
+services:
+  gateway-3:
+    image: ${SA_HELPER_IMAGE}
+    profiles: ["standby-gateway"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    environment:
+      <<: *node_b_env
+      INSTANCE_ID: ${INSTANCE_ID_PREFIX}-gateway-3
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2/logs:/app/backend/logs
+      - ${CONFIG_PATH}/sahelpertest2/data:/app/data
+      - ${CONFIG_PATH}/sahelpertest2/config:/app/backend/config
+      - ${CONFIG_PATH}/sahelpertest2/failover:/var/lib/sa-helper
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 5
+    ports:
+      - "${NODE_B_GATEWAY_BIND:-127.0.0.1}:${NODE_B_GATEWAY_PORT:-8080}:8080"
+    networks:
+      - sa_helper_node_b_network
+
+  captcha-worker:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *node_b_env
+      INSTANCE_ID: ${INSTANCE_ID_PREFIX}-captcha-worker
+      SOLVER_WORKER_CONCURRENCY: ${CAPTCHA_WORKER_CONCURRENCY}
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2/logs:/app/backend/logs
+      - ${CONFIG_PATH}/sahelpertest2/data:/app/data
+      - ${CONFIG_PATH}/sahelpertest2/config:/app/backend/config
+    networks:
+      - sa_helper_node_b_network
+
+  emergency-postgres:
+    image: postgres:16-alpine
+    container_name: sa-helper-emergency-postgres
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: ${TZ}
+      POSTGRES_DB: ${EMERGENCY_PGDATABASE}
+      POSTGRES_USER: ${EMERGENCY_PGUSER}
+      POSTGRES_PASSWORD: ${EMERGENCY_PGPASSWORD}
+      POSTGRES_PRIMARY_HOST: ${POSTGRES_PRIMARY_HOST}
+      POSTGRES_PRIMARY_PORT: ${POSTGRES_PRIMARY_PORT}
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+      POSTGRES_REPLICATION_SLOT: ${POSTGRES_REPLICATION_SLOT}
+      PGDATA: /var/lib/postgresql/data
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        mkdir -p "$${PGDATA}"
+        chown -R postgres:postgres "$${PGDATA}"
+        chmod 700 "$${PGDATA}"
+        if [ ! -s "$${PGDATA}/PG_VERSION" ]; then
+          if [ -z "$${POSTGRES_PRIMARY_HOST:-}" ] || [ -z "$${POSTGRES_REPLICATION_USER:-}" ] || [ -z "$${POSTGRES_REPLICATION_PASSWORD:-}" ]; then
+            echo "Primary host and replication credentials are required for initial standby bootstrap." >&2
+            exit 2
+          fi
+          rm -rf "$${PGDATA:?}/"*
+          export PGPASSWORD="$${POSTGRES_REPLICATION_PASSWORD}"
+          until pg_isready -h "$${POSTGRES_PRIMARY_HOST}" -p "$${POSTGRES_PRIMARY_PORT:-15432}" -U "$${POSTGRES_REPLICATION_USER}"; do
+            echo "Waiting for primary PostgreSQL at $${POSTGRES_PRIMARY_HOST}:$${POSTGRES_PRIMARY_PORT:-15432}..."
+            sleep 5
+          done
+          su-exec postgres pg_basebackup \
+            -h "$${POSTGRES_PRIMARY_HOST}" \
+            -p "$${POSTGRES_PRIMARY_PORT:-15432}" \
+            -U "$${POSTGRES_REPLICATION_USER}" \
+            -D "$${PGDATA}" \
+            -Fp \
+            -Xs \
+            -R \
+            -C \
+            -S "$${POSTGRES_REPLICATION_SLOT:-sa_helper_node_b}" \
+            -P
+        fi
+        if [ -s "$${PGDATA}/standby.signal" ] && [ -n "$${POSTGRES_PRIMARY_HOST:-}" ]; then
+          escaped_password=$$(printf '%s' "$${POSTGRES_REPLICATION_PASSWORD}" | sed "s/'/''/g")
+          escaped_user=$$(printf '%s' "$${POSTGRES_REPLICATION_USER}" | sed "s/'/''/g")
+          escaped_slot=$$(printf '%s' "$${POSTGRES_REPLICATION_SLOT:-sa_helper_node_b}" | sed "s/'/''/g")
+          sed -i '/^primary_conninfo =/d;/^primary_slot_name =/d' "$${PGDATA}/postgresql.auto.conf"
+          {
+            printf "primary_conninfo = 'host=%s port=%s user=%s password=%s application_name=sa_helper_node_b'\n" "$${POSTGRES_PRIMARY_HOST}" "$${POSTGRES_PRIMARY_PORT:-15432}" "$${escaped_user}" "$${escaped_password}"
+            printf "primary_slot_name = '%s'\n" "$${escaped_slot}"
+          } >> "$${PGDATA}/postgresql.auto.conf"
+          chown postgres:postgres "$${PGDATA}/postgresql.auto.conf"
+        fi
+        exec su-exec postgres postgres -c hot_standby=on
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2-emergency/postgres16:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 5
+    networks:
+      emergency_network:
+        aliases:
+          - sahelper_emergency_postgres
+
+  emergency-redis:
+    image: redis:7-alpine
+    container_name: sa-helper-emergency-redis
+    restart: unless-stopped
+    init: true
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        if [ -f /data/SA_HELPER_REDIS_PROMOTED ]; then
+          exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+        fi
+        exec redis-server \
+          --appendonly yes \
+          --requirepass "$${REDIS_PASSWORD}" \
+          --masterauth "$${REDIS_PRIMARY_PASSWORD}" \
+          --replicaof "$${REDIS_PRIMARY_HOST}" "$${REDIS_PRIMARY_PORT}"
+    environment:
+      TZ: ${TZ}
+      REDIS_PASSWORD: ${EMERGENCY_REDIS_PASSWORD}
+      REDIS_PRIMARY_HOST: ${REDIS_PRIMARY_HOST}
+      REDIS_PRIMARY_PORT: ${REDIS_PRIMARY_PORT}
+      REDIS_PRIMARY_PASSWORD: ${REDIS_PRIMARY_PASSWORD}
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2-emergency/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 5
+    networks:
+      emergency_network:
+        aliases:
+          - sahelper_emergency_redis
+
+  emergency-gateway:
+    image: ${SA_HELPER_IMAGE}
+    container_name: sa-helper-emergency-gateway
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      emergency-postgres:
+        condition: service_healthy
+      emergency-redis:
+        condition: service_healthy
+    command:
+      - sh
+      - -lc
+      - |
+        cd /app/backend
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers ${EMERGENCY_GATEWAY_WORKERS}
+    environment:
+      <<: *node_b_emergency_env
+      INSTANCE_ID: ${INSTANCE_ID_PREFIX}-emergency-gateway
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2-emergency/logs:/app/backend/logs
+      - ${CONFIG_PATH}/sahelpertest2-emergency/backups:/app/backend/backups
+      - ${CONFIG_PATH}/sahelpertest2-emergency/data:/app/data
+      - ${CONFIG_PATH}/sahelpertest2-emergency/config:/app/backend/config
+      - ${CONFIG_PATH}/sahelpertest2/failover:/var/lib/sa-helper
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/ready"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    networks:
+      emergency_network:
+        aliases:
+          - sahelper_emergency_gateway
+
+  emergency-api:
+    image: nginx:1.27-alpine
+    container_name: sa-helper-emergency-api
+    restart: unless-stopped
+    init: true
+    depends_on:
+      emergency-gateway:
+        condition: service_healthy
+    ports:
+      - "${HOME_EMERGENCY_BIND}:${HOME_EMERGENCY_PORT}:80"
+    command:
+      - sh
+      - -lc
+      - |
+        cat > /etc/nginx/conf.d/default.conf <<'EOF'
+        upstream emergency_api {
+            server sahelper_emergency_gateway:8080 max_fails=3 fail_timeout=10s;
+            keepalive 16;
+        }
+
+        server {
+            listen 80;
+            server_name _;
+            client_max_body_size 25m;
+            proxy_connect_timeout 10s;
+            proxy_send_timeout 120s;
+            proxy_read_timeout 120s;
+
+            location = /health {
+                proxy_pass http://emergency_api/health;
+            }
+
+            location = /ready {
+                proxy_pass http://emergency_api/ready;
+            }
+
+            location / {
+                proxy_pass http://emergency_api;
+                proxy_http_version 1.1;
+                proxy_set_header Connection "";
+                proxy_set_header Host $$host;
+                proxy_set_header X-Real-IP $$remote_addr;
+                proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $$scheme;
+            }
+        }
+        EOF
+        exec nginx -g 'daemon off;'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+    networks:
+      emergency_network:
+        aliases:
+          - sahelper_emergency_api
+
+  emergency-captcha-worker:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
+    depends_on:
+      emergency-gateway:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *node_b_emergency_env
+      INSTANCE_ID: ${INSTANCE_ID_PREFIX}-emergency-captcha-worker
+      SOLVER_WORKER_CONCURRENCY: ${EMERGENCY_CAPTCHA_WORKER_CONCURRENCY}
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2-emergency/logs:/app/backend/logs
+      - ${CONFIG_PATH}/sahelpertest2-emergency/data:/app/data
+      - ${CONFIG_PATH}/sahelpertest2-emergency/config:/app/backend/config
+    networks:
+      - emergency_network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: sa-helper-emergency-cloudflared
+    restart: unless-stopped
+    init: true
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TOKEN:-}"]
+    depends_on:
+      emergency-api:
+        condition: service_healthy
+    networks:
+      - emergency_network
+
+  failover-controller:
+    image: ${SA_HELPER_IMAGE}
+    container_name: sa-helper-failover-controller
+    restart: unless-stopped
+    init: true
+    command: ["python", "/app/scripts/failover_controller.py"]
+    environment:
+      TZ: ${TZ}
+      PYTHONUNBUFFERED: "1"
+      FAILOVER_MODE_FILE: ${FAILOVER_MODE_FILE:-/var/lib/sa-helper/failover-mode.json}
+      FAILOVER_POLL_SECONDS: ${FAILOVER_POLL_SECONDS:-30}
+      FAILOVER_API_OUTAGE_SECONDS: ${FAILOVER_API_OUTAGE_SECONDS:-600}
+      FAILOVER_FULL_OUTAGE_SECONDS: ${FAILOVER_FULL_OUTAGE_SECONDS:-1800}
+      FAILOVER_RESTORE_STABLE_SECONDS: ${FAILOVER_RESTORE_STABLE_SECONDS:-600}
+      FAILOVER_PRIMARY_READY_URL: ${FAILOVER_PRIMARY_READY_URL}
+      FAILOVER_PRIMARY_HEALTH_URL: ${FAILOVER_PRIMARY_HEALTH_URL}
+      FAILOVER_NODE_B_HEALTH_URL: ${FAILOVER_NODE_B_HEALTH_URL}
+      FAILOVER_PRIMARY_DB_HOST: ${FAILOVER_PRIMARY_DB_HOST}
+      FAILOVER_PRIMARY_DB_PORT: ${FAILOVER_PRIMARY_DB_PORT}
+      FAILOVER_LOCAL_DB_HOST: ${FAILOVER_LOCAL_DB_HOST}
+      FAILOVER_LOCAL_DB_PORT: ${FAILOVER_LOCAL_DB_PORT}
+      FAILOVER_HOOK_STANDBY: ${FAILOVER_HOOK_STANDBY:-}
+      FAILOVER_HOOK_REMOTE_PRIMARY_DB: ${FAILOVER_HOOK_REMOTE_PRIMARY_DB:-}
+      FAILOVER_HOOK_FAILOVER_READONLY: ${FAILOVER_HOOK_FAILOVER_READONLY:-}
+      FAILOVER_HOOK_TIMEOUT_SECONDS: ${FAILOVER_HOOK_TIMEOUT_SECONDS:-120}
+    healthcheck:
+      disable: true
+    volumes:
+      - ${CONFIG_PATH}/sahelpertest2/failover:/var/lib/sa-helper
+    networks:
+      - sa_helper_node_b_network
+      - emergency_network
+
+networks:
+  sa_helper_node_b_network:
+    name: sa-helper-node-b-network
+    driver: bridge
+  emergency_network:
+    name: sa-helper-emergency
+    driver: bridge

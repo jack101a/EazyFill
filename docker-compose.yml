@@ -1,0 +1,156 @@
+name: eazyfill
+
+x-eazyfill-image: &eazyfill_image ${EAZYFILL_IMAGE:-ghcr.io/jack101a/eazyfill:latest}
+
+x-eazyfill-env: &eazyfill_env
+  TZ: ${TZ:-Asia/Kolkata}
+  APP_ENV: ${APP_ENV:-production}
+  APP_MODE: ${APP_MODE:-normal}
+  APP_CONFIG_PATH: /app/backend/config/config.yaml
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+  DB_TYPE: postgresql
+  LEGACY_DB_TYPE: postgresql
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-eazyfill}
+  POSTGRES_USER: ${POSTGRES_USER:-eazyfill}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  REDIS_ENABLED: "true"
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  REDIS_PREFIX: ${REDIS_PREFIX:-eazyfill:}
+  SOLVER_QUEUE_BACKEND: ${SOLVER_QUEUE_BACKEND:-redis}
+  SOLVER_QUEUE_FALLBACK_LOCAL: ${SOLVER_QUEUE_FALLBACK_LOCAL:-false}
+  SOLVER_JOB_TIMEOUT_SECONDS: ${SOLVER_JOB_TIMEOUT_SECONDS:-30}
+  SOLVER_JOB_ATTEMPTS: ${SOLVER_JOB_ATTEMPTS:-3}
+  SOLVER_RESULT_TTL_SECONDS: ${SOLVER_RESULT_TTL_SECONDS:-120}
+  AUTH_HASH_SALT: ${AUTH_HASH_SALT}
+  ADMIN_TOKEN: ${ADMIN_TOKEN}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+  RAZORPAY_ORDER_TOKEN: ${RAZORPAY_ORDER_TOKEN:-}
+  OTP_EMAIL_ENABLED: ${OTP_EMAIL_ENABLED:-true}
+  OTP_EMAIL_PROVIDER: ${OTP_EMAIL_PROVIDER:-brevo}
+  BREVO_API_KEY: ${BREVO_API_KEY:-}
+  OTP_EMAIL_FROM: ${OTP_EMAIL_FROM:-no-reply.eazyfill@002529.xyz}
+  OTP_EMAIL_FROM_NAME: ${OTP_EMAIL_FROM_NAME:-EazyFill}
+  OTP_EMAIL_REPLY_TO: ${OTP_EMAIL_REPLY_TO:-support.eazyfill@002529.xyz}
+  OTP_DEV_OTP_ENABLED: ${OTP_DEV_OTP_ENABLED:-false}
+  OTP_ALLOWED_EMAIL_DOMAINS: ${OTP_ALLOWED_EMAIL_DOMAINS:-gmail.com,googlemail.com,hotmail.com,outlook.com,live.com,msn.com,proton.me,protonmail.com,pm.me,rediffmail.com,rediff.com,yahoo.com,ymail.com,rocketmail.com,icloud.com,me.com,mac.com,aol.com,zoho.com,zohomail.com,fastmail.com,hey.com,mail.com,gmx.com,gmx.net,tutanota.com,tuta.io}
+  OTP_BLOCKED_EMAIL_DOMAINS: ${OTP_BLOCKED_EMAIL_DOMAINS:-10minutemail.com,20minutemail.com,anonaddy.com,dispostable.com,emailondeck.com,fakeinbox.com,getnada.com,guerrillamail.com,grr.la,maildrop.cc,mailinator.com,mintemail.com,moakt.com,mytemp.email,sharklasers.com,temp-mail.org,tempmail.com,throwawaymail.com,trashmail.com,yopmail.com}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+  DISCORD_NOTIFY_ENABLED: ${DISCORD_NOTIFY_ENABLED:-true}
+
+x-eazyfill-volumes: &eazyfill_volumes
+  - ${CONFIG_PATH:-/srv/ajaxhs/config/eazyfill}/logs:/app/backend/logs
+  - ${CONFIG_PATH:-/srv/ajaxhs/config/eazyfill}/backups:/app/backend/backups
+  - ${CONFIG_PATH:-/srv/ajaxhs/config/eazyfill}/data:/app/data
+  - ${CONFIG_PATH:-/srv/ajaxhs/config/eazyfill}/config:/app/backend/config
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+      POSTGRES_DB: ${POSTGRES_DB:-eazyfill}
+      POSTGRES_USER: ${POSTGRES_USER:-eazyfill}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${CONFIG_PATH:-/srv/ajaxhs/config/eazyfill}/postgres16:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 5
+    networks:
+      - eazyfill
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    init: true
+    command: ["sh", "-lc", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ${CONFIG_PATH:-/srv/ajaxhs/config/eazyfill}/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 5
+    networks:
+      - eazyfill
+
+  api:
+    image: *eazyfill_image
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *eazyfill_env
+      INSTANCE_ID: eazyfill-api
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      RUN_BACKGROUND_TASKS: "false"
+    volumes: *eazyfill_volumes
+    ports:
+      - "${PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    networks:
+      - eazyfill
+
+  captcha-worker:
+    image: *eazyfill_image
+    restart: unless-stopped
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *eazyfill_env
+      INSTANCE_ID: eazyfill-captcha-worker
+      RUN_MIGRATIONS: "false"
+      SOLVER_WORKER_CONCURRENCY: ${SOLVER_WORKER_CONCURRENCY:-2}
+    volumes: *eazyfill_volumes
+    networks:
+      - eazyfill
+
+  scheduler:
+    image: *eazyfill_image
+    restart: unless-stopped
+    init: true
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "app.scheduler"]
+    environment:
+      <<: *eazyfill_env
+      INSTANCE_ID: eazyfill-scheduler
+      RUN_MIGRATIONS: "false"
+    volumes: *eazyfill_volumes
+    networks:
+      - eazyfill
+
+networks:
+  eazyfill:
+    name: eazyfill-network

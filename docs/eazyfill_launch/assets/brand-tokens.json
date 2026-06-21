@@ -1,0 +1,29 @@
+{
+  "brand": "EazyFill",
+  "colors": {
+    "ink": "#0B1020",
+    "night": "#12052B",
+    "night2": "#08020F",
+    "violet": "#8B5CF6",
+    "purple": "#A83AFB",
+    "magenta": "#F040C8",
+    "pink": "#FF5FB8",
+    "white": "#FFFFFF",
+    "paper": "#F8F7FC",
+    "muted": "#98A2B3",
+    "line": "#E6E2F0",
+    "success": "#24D18F"
+  },
+  "gradient": {
+    "angle": 135,
+    "stops": [
+      "#8B5CF6",
+      "#A83AFB",
+      "#FF5FB8"
+    ]
+  },
+  "font": {
+    "family": "Inter",
+    "fallback": "Arial, sans-serif"
+  }
+}

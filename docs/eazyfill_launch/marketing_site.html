@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EazyFill</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #101828;
+      --muted: #526070;
+      --line: #d9e2ec;
+      --paper: #f7fafc;
+      --accent: #0f9f75;
+      --blue: #2457d6;
+      --gold: #9a6700;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    header, main, footer { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+    header {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      padding: 22px 0;
+    }
+    .brand { align-items: center; display: flex; font-weight: 800; gap: 10px; }
+    .brand img { height: 34px; width: 34px; }
+    nav { display: flex; gap: 16px; }
+    nav a, footer a { color: var(--muted); text-decoration: none; }
+    .hero {
+      display: grid;
+      gap: 32px;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
+      min-height: calc(100svh - 116px);
+      padding: 52px 0 36px;
+    }
+    h1 { font-size: clamp(42px, 7vw, 86px); line-height: .94; margin: 0; letter-spacing: 0; }
+    h2 { font-size: 28px; margin: 0 0 12px; }
+    p { color: var(--muted); font-size: 18px; margin: 18px 0 0; max-width: 640px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+    .button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      font-weight: 700;
+      padding: 11px 14px;
+      text-decoration: none;
+    }
+    .button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .product {
+      align-self: center;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .bar { align-items: center; display: flex; gap: 8px; margin-bottom: 16px; }
+    .dot { background: var(--accent); border-radius: 50%; height: 10px; width: 10px; }
+    .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+    .row { align-items: center; border-top: 1px solid var(--line); display: flex; justify-content: space-between; padding: 12px 0; }
+    .row:first-child { border-top: 0; }
+    .tag { border-radius: 999px; color: #fff; font-size: 12px; font-weight: 800; padding: 4px 8px; }
+    .tag.green { background: var(--accent); }
+    .tag.blue { background: var(--blue); }
+    .tag.gold { background: var(--gold); }
+    .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 42px 0; }
+    .card { border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .card strong { display: block; font-size: 18px; margin-bottom: 8px; }
+    footer { border-top: 1px solid var(--line); color: var(--muted); display: flex; justify-content: space-between; padding: 24px 0 36px; }
+    .footer-links { display: flex; gap: 16px; }
+    @media (max-width: 820px) {
+      nav { display: none; }
+      .hero, .grid { grid-template-columns: 1fr; }
+      .hero { padding-top: 24px; }
+      footer { display: block; }
+      .footer-links { margin-top: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><img src="../../extension/icons/icon128.png" alt="">EazyFill</div>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#privacy">Privacy</a>
+      <a href="support_faq.md">Support</a>
+      <a href="chrome_web_store_listing.md">Store draft</a>
+    </nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div>
+        <h1>EazyFill</h1>
+        <p>User-controlled assistance for configured CAPTCHA fields, repeatable form filling, optional encrypted sync, and managed userscripts.</p>
+        <div class="actions">
+          <a class="button primary" href="../../extension/dist/eazyfill-chrome-v1.0.0.zip">Chrome package</a>
+          <a class="button" href="submission_checklist.md">Launch checklist</a>
+        </div>
+      </div>
+      <div class="product" aria-label="EazyFill product preview">
+        <div class="bar"><span class="dot"></span><strong>Connected free plan</strong></div>
+        <div class="panel">
+          <div class="row"><span>CAPTCHA selectors</span><span class="tag green">Configured</span></div>
+          <div class="row"><span>Form rules</span><span class="tag blue">User run</span></div>
+          <div class="row"><span>Cloud sync</span><span class="tag gold">Optional</span></div>
+          <div class="row"><span>User scripts</span><span class="tag green">Browser gated</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="grid" id="features">
+      <article class="card"><strong>CAPTCHA Assist</strong><span>Choose source and target fields per site, request a supported solve, and review the filled result.</span></article>
+      <article class="card"><strong>Form Rules</strong><span>Record or author reusable set, click, check, select, and wait actions for pages you choose.</span></article>
+      <article class="card"><strong>Encrypted Sync</strong><span>Optionally encrypt rules, profiles, scripts, selectors, and settings before uploading a backup.</span></article>
+    </section>
+    <section class="grid" id="privacy">
+      <article class="card"><strong>Local First</strong><span>Rules, scripts, profiles, selectors, and settings are stored in browser extension storage.</span></article>
+      <article class="card"><strong>User Controlled</strong><span>You choose the sites, selectors, rules, scripts, and assistance actions to use.</span></article>
+      <article class="card"><strong>No Data Sales</strong><span>EazyFill does not sell user data. Billing providers handle payment credentials.</span></article>
+    </section>
+  </main>
+  <footer>
+    <span>EazyFill launch artifact</span>
+    <span class="footer-links">
+      <a href="../CHROME_STORE_PRIVACY.md">Privacy publication status</a>
+      <a href="support_faq.md">Support FAQ</a>
+    </span>
+  </footer>
+</body>
+</html>

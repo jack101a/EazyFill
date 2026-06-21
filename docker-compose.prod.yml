@@ -1,0 +1,60 @@
+# Optional production resource and log-retention overrides.
+# Use with: docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+x-json-logs: &json_logs
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+  postgres:
+    logging: *json_logs
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  api:
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 3G
+        reservations:
+          memory: 768M
+    logging: *json_logs
+
+  captcha-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: "3.00"
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging: *json_logs
+
+  scheduler:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 768M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"

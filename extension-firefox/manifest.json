@@ -1,0 +1,122 @@
+{
+  "manifest_version": 3,
+  "name": "EazyFill",
+  "version": "1.0.0",
+  "default_locale": "en",
+  "description": "CAPTCHA solving, form autofill, and userscript tools for browser productivity",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "alarms",
+    "notifications",
+    "userScripts",
+    "downloads",
+    "webNavigation"
+  ],
+  "optional_permissions": [
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "userscripts/matcher.js",
+        "userscripts/runtime.js",
+        "userscripts/engine.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ],
+      "js": [
+        "lib/selector-builder.js",
+        "content/excluded-hosts.js",
+        "content/captcha-filler.js",
+        "content/captcha-detector.js",
+        "content/autofill-engine.js",
+        "content/selector-overlay.js",
+        "content/recorder-panel.js",
+        "content/recorder-engine.js",
+        "content/bootstrap.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "*://*/*.user.js*"
+      ],
+      "js": [
+        "content/userscript-installer.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png",
+      "192": "icons/icon192.png",
+      "256": "icons/icon256.png",
+      "512": "icons/icon512.png"
+    }
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png",
+    "192": "icons/icon192.png",
+    "256": "icons/icon256.png",
+    "512": "icons/icon512.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "userscripts/gm-shim.js"
+      ],
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* http://*:* https://*:*"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "eazyfill@sa-helper.local",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": {
+        "required": [
+          "authenticationInfo",
+          "websiteContent"
+        ]
+      }
+    }
+  }
+}
