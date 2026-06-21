@@ -66,10 +66,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate Docker Compose config
-        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+          docker compose --env-file .env.portainer-ha.example -f docker-compose.portainer-ha.yml config --quiet
 
       - name: Build Docker image
-        run: docker build -t eazyfill:ci .
+        run: |
+          docker build -t eazyfill:ci .
+          docker build -f Dockerfile.haproxy -t eazyfill-haproxy:ci .
+          docker run --rm eazyfill-haproxy:ci haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
 
       - name: Smoke health endpoint
         run: |

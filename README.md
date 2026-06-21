@@ -62,6 +62,7 @@ The canonical deployment path is:
 - optional `docker-compose.portainer-ha.yml` for Node A HA with HAProxy, two gateways, scheduler, and scaled CAPTCHA workers
 - optional `docker-compose.node-a-worker-access.yml` for remote worker access
 - optional `docker-compose.node-b-workers.yml` for a worker-only mini PC
+- `Dockerfile.haproxy` plus `deploy/haproxy/eazyfill.cfg` for the packaged HAProxy edge image
 - `.env.example`
 
 The published image is:

@@ -146,7 +146,7 @@ services:
           - test-stack-eazyfill-gateway-2
 
   api-haproxy:
-    image: haproxy:2.9-alpine
+    image: ${EAZYFILL_HAPROXY_IMAGE:-ghcr.io/jack101a/eazyfill-haproxy:latest}
     restart: unless-stopped
     init: true
     depends_on:
@@ -154,68 +154,8 @@ services:
         condition: service_healthy
       gateway-2:
         condition: service_healthy
-    environment:
-      HAPROXY_NODE_B_GATEWAY: ${HAPROXY_NODE_B_GATEWAY:-}
-      HAPROXY_NODE_B_BACKUP: ${HAPROXY_NODE_B_BACKUP:-true}
-      HAPROXY_NODE_B_WEIGHT: ${HAPROXY_NODE_B_WEIGHT:-1}
     ports:
       - "${PUBLIC_HTTP_BIND}:${PORT}:80"
-    command:
-      - sh
-      - -lc
-      - |
-        cat > /tmp/haproxy.cfg <<'EOF'
-        global
-            log stdout format raw local0
-            maxconn 4096
-
-        defaults
-            mode http
-            log global
-            option httplog
-            option dontlognull
-            option forwardfor
-            timeout connect 10s
-            timeout client 120s
-            timeout server 120s
-
-        resolvers docker
-            nameserver dns 127.0.0.11:53
-            resolve_retries 3
-            timeout resolve 1s
-            timeout retry 1s
-            hold valid 10s
-
-        frontend http_in
-            bind *:80
-            http-request set-header X-Forwarded-Proto http unless { req.hdr(X-Forwarded-Proto) -m found }
-            http-request set-header X-Real-IP %[src] unless { req.hdr(X-Real-IP) -m found }
-            acl auth_path path_beg /v2/auth
-            use_backend eazyfill_auth_api if auth_path
-            default_backend eazyfill_api
-
-        backend eazyfill_auth_api
-            option httpchk GET /ready
-            http-check expect status 200
-            server gateway1 test-stack-eazyfill-gateway-1:8080 check inter 5s fall 3 rise 2 resolvers docker init-addr libc,none
-
-        backend eazyfill_api
-            balance leastconn
-            option httpchk GET /ready
-            http-check expect status 200
-            server gateway1 test-stack-eazyfill-gateway-1:8080 check inter 5s fall 3 rise 2 resolvers docker init-addr libc,none
-            server gateway2 test-stack-eazyfill-gateway-2:8080 check inter 5s fall 3 rise 2 resolvers docker init-addr libc,none
-        EOF
-        if [ -n "$${HAPROXY_NODE_B_GATEWAY:-}" ]; then
-          node_b_mode=""
-          if [ "$${HAPROXY_NODE_B_BACKUP:-true}" = "true" ] || [ "$${HAPROXY_NODE_B_BACKUP:-true}" = "1" ]; then
-            node_b_mode="backup"
-          else
-            node_b_mode="weight $${HAPROXY_NODE_B_WEIGHT:-1}"
-          fi
-          printf '    server nodeb %s check inter 5s fall 3 rise 2 %s\n' "$${HAPROXY_NODE_B_GATEWAY}" "$${node_b_mode}" >> /tmp/haproxy.cfg
-        fi
-        exec haproxy -W -db -f /tmp/haproxy.cfg
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null"]
       interval: 20s
