@@ -209,6 +209,19 @@ def _find_plan(session, plan_code: str) -> SubscriptionPlan | None:
     )
 
 
+def _login_plan(session, plan_code: str) -> SubscriptionPlan | None:
+    plan = _find_plan(session, plan_code)
+    if plan and int(plan.price_amount or 0) <= 0:
+        return plan
+    return _find_plan(session, "free")
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 def _user_for_identifier(session, identifier_type: str, identifier: str) -> User | None:
     if identifier_type == "mobile":
         return session.query(User).filter(User.mobile_number == identifier).first()
@@ -260,6 +273,7 @@ def _create_or_update_user(session, challenge: dict[str, Any]) -> User:
 
 
 def _ensure_subscription(session, user: User, plan_code: str) -> UserSubscription | None:
+    now = datetime.now(timezone.utc)
     existing = (
         session.query(UserSubscription)
         .filter(UserSubscription.user_id == user.id, UserSubscription.status == "active")
@@ -267,11 +281,16 @@ def _ensure_subscription(session, user: User, plan_code: str) -> UserSubscriptio
         .first()
     )
     if existing:
-        return existing
-    plan = _find_plan(session, plan_code)
+        end_at = _as_utc(existing.end_at)
+        if end_at is None or end_at >= now:
+            return existing
+        existing.status = "expired"
+        existing.updated_at = now.replace(tzinfo=None)
+        session.flush()
+
+    plan = _login_plan(session, plan_code)
     if not plan:
         return None
-    now = datetime.now(timezone.utc)
     sub = UserSubscription(
         user_id=user.id,
         plan_id=plan.id,
