@@ -102,7 +102,7 @@ async def validate_v2_key(
 ) -> V2AuthContext:
     api_key = str(x_api_key or "").strip()
     if not api_key:
-        raise _auth_error(401, "invalid_key", "API key is required")
+        raise _auth_error(401, "invalid_key", "Sign in is required")
 
     device_id = _device_id(request, x_eazyfill_device_id or x_flowpilot_device_id)
     container = request.app.state.container
@@ -113,7 +113,7 @@ async def validate_v2_key(
         if record:
             auth_error = record.get("auth_error")
             if auth_error:
-                raise _auth_error(403, str(auth_error), "API key is not allowed")
+                raise _auth_error(403, str(auth_error), "Account access is not allowed")
             if not user_key_service.validate_device(int(record["id"]), device_id):
                 bound = user_key_service.bind_device(
                     int(record["id"]),
@@ -121,18 +121,18 @@ async def validate_v2_key(
                     user_agent=request.headers.get("user-agent", ""),
                 )
                 if bound is None:
-                    raise _auth_error(401, "device_mismatch", "API key is locked to another device")
+                    raise _auth_error(401, "device_mismatch", "This browser is not authorized for the account")
             return _load_user_context(record, api_key, device_id)
 
     legacy_record = container.key_service.validate_key(api_key)
     if not legacy_record:
-        raise _auth_error(401, "invalid_key", "API key is invalid")
+        raise _auth_error(401, "invalid_key", "Sign in again to continue")
     if not container.key_service.validate_or_bind_device(
         int(legacy_record["id"]),
         device_id,
         user_agent=request.headers.get("user-agent", ""),
     ):
-        raise _auth_error(401, "device_mismatch", "API key is locked to another device")
+        raise _auth_error(401, "device_mismatch", "This browser is not authorized for the account")
     return V2AuthContext(
         api_key=api_key,
         device_id=device_id,

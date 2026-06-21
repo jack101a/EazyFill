@@ -241,7 +241,7 @@ function setPopupAuthVisible(visible) {
   document.documentElement.dataset.authPanel = visible ? "open" : "closed";
   if (visible) {
     requestAnimationFrame(() => {
-      (state.authChallengeId ? $("popup-auth-otp") : $("popup-auth-name"))?.focus();
+      (state.authChallengeId ? $("popup-auth-otp") : $("popup-auth-email"))?.focus();
     });
   }
 }
@@ -488,11 +488,6 @@ async function refreshStatus() {
 async function sendPopupOtp() {
   const email = cleanAuthEmail($("popup-auth-email")?.value || "");
   const name = $("popup-auth-name")?.value.trim() || "";
-  if (!name) {
-    setAuthMessage("Enter your name.", "error");
-    $("popup-auth-name")?.focus();
-    return;
-  }
   const validationMessage = authEmailValidationMessage(email);
   if (validationMessage) {
     setAuthMessage(validationMessage, "error");
@@ -509,7 +504,9 @@ async function sendPopupOtp() {
   });
   if (button) setLoading(button, false);
   if (!response.ok) {
-    setAuthMessage(response.error || "Could not send verification code.", "error");
+    const message = response.error || "Could not send verification code.";
+    setAuthMessage(message, "error");
+    if (/name/i.test(message)) $("popup-auth-name")?.focus();
     return;
   }
 

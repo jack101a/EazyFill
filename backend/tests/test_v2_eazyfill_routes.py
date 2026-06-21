@@ -283,6 +283,46 @@ def test_v2_auth_register_sends_email_otp_without_dev_code():
     assert email_service.send_otp_email.await_args.kwargs["recipient"] == "user@gmail.com"
 
 
+def test_v2_auth_register_allows_existing_user_login_without_name(monkeypatch):
+    from app.api.v2_routes import auth as auth_route
+
+    app = _app()
+    email_service = SimpleNamespace(enabled=True, send_otp_email=AsyncMock(return_value=SimpleNamespace(message_id="msg-1")))
+    app.state.container.email_service = email_service
+    app.state.container.settings = SimpleNamespace(
+        server=SimpleNamespace(debug=False),
+        email=SimpleNamespace(otp_dev_otp_enabled=False),
+    )
+    monkeypatch.setattr(auth_route, "_identifier_belongs_to_existing_user", lambda *_args: True)
+
+    response = TestClient(app).post("/v2/auth/register", json={"email": "existing@gmail.com"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["account_mode"] == "login"
+    assert body["challenge_id"]
+    email_service.send_otp_email.assert_awaited_once()
+
+
+def test_v2_auth_register_requires_name_for_new_account(monkeypatch):
+    from app.api.v2_routes import auth as auth_route
+
+    app = _app()
+    email_service = SimpleNamespace(enabled=True, send_otp_email=AsyncMock())
+    app.state.container.email_service = email_service
+    app.state.container.settings = SimpleNamespace(
+        server=SimpleNamespace(debug=False),
+        email=SimpleNamespace(otp_dev_otp_enabled=False),
+    )
+    monkeypatch.setattr(auth_route, "_identifier_belongs_to_existing_user", lambda *_args: False)
+
+    response = TestClient(app).post("/v2/auth/register", json={"email": "newuser@gmail.com"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"] == "name_required"
+    email_service.send_otp_email.assert_not_called()
+
+
 def test_v2_auth_register_rate_limits_repeated_otp_requests(monkeypatch):
     from app.api.v2_routes import auth as auth_route
 

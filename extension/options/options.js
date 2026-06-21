@@ -641,7 +641,7 @@ function renderStatus() {
   setText("account-plan", state.auth.plan?.name || state.auth.plan?.code || "--");
   setText("account-device", state.auth.device?.status || "Current browser");
   setText("account-expires", formatDate(state.auth.keyInfo?.expires_at));
-  setText("account-summary-status", authenticated ? "Connected" : "Create account");
+  setText("account-summary-status", authenticated ? "Connected" : "Sign in");
   setText("account-summary-plan", state.auth.plan?.name || state.auth.plan?.code || "Free Tier");
   setText("account-summary-credits", `${credits.remaining || 0} / ${credits.limit || 0}`);
 
@@ -2474,7 +2474,7 @@ function focusAccountSignup() {
   activatePanel("account-panel");
   requestAnimationFrame(() => {
     $("account-disconnected-view")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    $("options-signup-name")?.focus();
+    $("options-signup-identifier")?.focus();
   });
 }
 
@@ -2539,12 +2539,12 @@ function renderBilling() {
       ? "Current Plan"
       : authenticated
         ? `Continue with ${billingProviderLabel(billingProvider)}`
-        : "Create Account First";
+        : "Sign In First";
     if (!isCurrent) {
       button.addEventListener("click", () => {
         if (!authenticated) {
           focusAccountSignup();
-          toast("Create your account first, then choose a plan.", "info");
+          toast("Sign in first, then choose a plan.", "info");
           return;
         }
         handle(() => createBillingOrder(plan), "Order created");
@@ -2585,11 +2585,11 @@ function renderBilling() {
 
     const button = document.createElement("button");
     button.className = "secondary-btn buy-pack-btn";
-    button.textContent = authenticated ? `Buy with ${billingProviderLabel(billingProvider)}` : "Create Account First";
+    button.textContent = authenticated ? `Buy with ${billingProviderLabel(billingProvider)}` : "Sign In First";
     button.addEventListener("click", () => {
       if (!authenticated) {
         focusAccountSignup();
-        toast("Create your account first, then buy credits.", "info");
+        toast("Sign in first, then buy credits.", "info");
         return;
       }
       handle(() => createBillingOrder(pack), "Order created");
@@ -3455,8 +3455,20 @@ async function importScriptFromUrl() {
 
 async function importScriptFromDirectUrl() {
   const input = $("script-import-url-input");
-  await showScriptInstallReviewFromUrl(input?.value || "");
+  const { rawCode, sourceUrl } = await fetchScriptFromUrl(input?.value || "");
+  const script = await scriptFromRemote(rawCode, sourceUrl);
+  state.scripts = [...state.scripts, script];
+  state.selectedScriptId = null;
+  state.pendingScriptInstall = null;
+  await setStorage({ fp_scripts: state.scripts });
+  await registerUserscripts();
+  renderUserscriptInstallReview();
+  renderScripts();
+  renderProfiles();
+  renderStatus();
   if (input) input.value = "";
+  toast("Userscript imported", "success");
+  return script;
 }
 
 async function prepareInstallScriptFromUrl(url) {
@@ -3658,7 +3670,7 @@ async function loadBillingData() {
 async function createBillingOrder(plan) {
   if (!state.auth.apiKey || state.auth.valid === false) {
     focusAccountSignup();
-    throw new Error("Create your account before choosing a plan.");
+    throw new Error("Sign in before choosing a plan.");
   }
   const provider = preferredBillingProvider(plan);
   const payload = {
@@ -4032,11 +4044,6 @@ async function optionsSendOtp() {
   const name = $("options-signup-name")?.value.trim() || "";
   const identifier = $("options-signup-identifier")?.value.trim() || "";
   const messageNode = $("options-signup-message");
-  if (!name) {
-    setInlineMessage(messageNode, "Enter your name.", "error");
-    $("options-signup-name")?.focus();
-    return;
-  }
   if (!identifier) {
     setInlineMessage(messageNode, "Enter your email.", "error");
     $("options-signup-identifier")?.focus();
@@ -4056,7 +4063,9 @@ async function optionsSendOtp() {
   });
   if (button) button.disabled = false;
   if (!response.ok) {
-    setInlineMessage(messageNode, response.error || "Could not send OTP.", "error");
+    const message = response.error || "Could not send OTP.";
+    setInlineMessage(messageNode, message, "error");
+    if (/name/i.test(message)) $("options-signup-name")?.focus();
     return;
   }
   otpChallengeId = response.challenge_id || response.challengeId || response.challenge?.id || "";

@@ -236,6 +236,14 @@ def _user_for_identifier(session, identifier_type: str, identifier: str) -> User
     )).first()
 
 
+def _identifier_belongs_to_existing_user(identifier_type: str, identifier: str) -> bool:
+    session = get_session()
+    try:
+        return _user_for_identifier(session, identifier_type, identifier) is not None
+    finally:
+        session.close()
+
+
 def _create_or_update_user(session, challenge: dict[str, Any]) -> User:
     identifier_type = str(challenge["identifier_type"])
     identifier = str(challenge["identifier"])
@@ -338,10 +346,13 @@ async def register(request: Request, payload: RegisterRequest) -> dict:
 
     settings = getattr(request.app.state.container, "settings", None)
     _validate_supported_email(settings, identifier)
+    existing_account = False
     if not payload.name.strip():
+        existing_account = _identifier_belongs_to_existing_user(identifier_type, identifier)
+    if not payload.name.strip() and not existing_account:
         raise HTTPException(
             status_code=422,
-            detail={"error": "name_required", "message": "Name is required"},
+            detail={"error": "name_required", "message": "Name is required for new accounts"},
         )
     email_service = getattr(request.app.state.container, "email_service", None)
     email_enabled = bool(getattr(email_service, "enabled", False))
@@ -385,6 +396,7 @@ async def register(request: Request, payload: RegisterRequest) -> dict:
         "challenge_id": challenge_id,
         "delivery": "email",
         "expires_in_seconds": OTP_TTL_SECONDS,
+        "account_mode": "login" if existing_account else "signup",
     }
     if dev_otp_enabled:
         response["dev_otp"] = otp

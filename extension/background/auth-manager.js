@@ -59,15 +59,15 @@ export function createAuthManager({ apiClient }) {
 
   async function saveApiKey(apiKey, options = {}) {
     const clean = sanitizeApiKey(apiKey);
-    if (!clean) throw new Error("API key is required");
+    if (!clean) throw new Error("Sign in is required");
     if (!clean.startsWith("fp_") && options.allowLegacyPrefix !== true) {
-      throw new Error("EazyFill API keys must start with fp_");
+      throw new Error("This EazyFill sign-in token is not supported");
     }
 
     let verification = null;
     if (options.verify !== false) {
       verification = await verifyApiKey(clean);
-      if (!verification.valid) throw new Error("API key verification failed");
+      if (!verification.valid) throw new Error("Could not verify this EazyFill session");
     }
 
     const auth = {
@@ -106,7 +106,7 @@ export function createAuthManager({ apiClient }) {
       device_name: payload.deviceName || payload.device_name || "EazyFill Extension"
     }, { retry: false, skipAuth: true });
     const apiKey = sanitizeApiKey(response.api_key);
-    if (!apiKey) throw new Error("OTP verified but no API key was returned");
+    if (!apiKey) throw new Error("OTP verified but sign-in could not be completed");
     const verification = normalizeVerification(response);
     const auth = {
       apiKey,
