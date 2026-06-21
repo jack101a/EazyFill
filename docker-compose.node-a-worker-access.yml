@@ -1,0 +1,69 @@
+# Optional Node A sidecar stack for remote Node B CAPTCHA workers.
+#
+# This does not modify the main EazyFill stack. It joins the existing EazyFill
+# Docker network and exposes private/VPN-bound TCP ports for Postgres and Redis.
+#
+# Bind POSTGRES_WORKER_BIND and REDIS_WORKER_BIND to a private/VPN interface
+# such as WireGuard or Tailscale. Do not expose these ports publicly.
+
+name: eazyfill-node-a-worker-access
+
+services:
+  worker-access-proxy:
+    image: haproxy:2.9-alpine
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_A_POSTGRES_INTERNAL_HOST: ${NODE_A_POSTGRES_INTERNAL_HOST:-postgres}
+      NODE_A_POSTGRES_INTERNAL_PORT: ${NODE_A_POSTGRES_INTERNAL_PORT:-5432}
+      NODE_A_REDIS_INTERNAL_HOST: ${NODE_A_REDIS_INTERNAL_HOST:-redis}
+      NODE_A_REDIS_INTERNAL_PORT: ${NODE_A_REDIS_INTERNAL_PORT:-6379}
+    ports:
+      - "${POSTGRES_WORKER_BIND:-127.0.0.1}:${POSTGRES_WORKER_PORT:-15432}:15432"
+      - "${REDIS_WORKER_BIND:-127.0.0.1}:${REDIS_WORKER_PORT:-16379}:16379"
+    command:
+      - sh
+      - -lc
+      - |
+        cat > /tmp/haproxy.cfg <<EOF
+        global
+            log stdout format raw local0
+            maxconn 2048
+
+        defaults
+            mode tcp
+            log global
+            option tcplog
+            timeout connect 10s
+            timeout client 2m
+            timeout server 2m
+
+        resolvers docker
+            nameserver dns 127.0.0.11:53
+            resolve_retries 3
+            timeout resolve 1s
+            timeout retry 1s
+            hold valid 10s
+
+        frontend postgres_in
+            bind *:15432
+            default_backend postgres_backend
+
+        backend postgres_backend
+            server postgres ${NODE_A_POSTGRES_INTERNAL_HOST}:${NODE_A_POSTGRES_INTERNAL_PORT} check resolvers docker init-addr libc,none
+
+        frontend redis_in
+            bind *:16379
+            default_backend redis_backend
+
+        backend redis_backend
+            server redis ${NODE_A_REDIS_INTERNAL_HOST}:${NODE_A_REDIS_INTERNAL_PORT} check resolvers docker init-addr libc,none
+        EOF
+        exec haproxy -W -db -f /tmp/haproxy.cfg
+    networks:
+      - eazyfill-node-a-network
+
+networks:
+  eazyfill-node-a-network:
+    external: true
+    name: ${EAZYFILL_NODE_A_DOCKER_NETWORK:-eazyfill-network}

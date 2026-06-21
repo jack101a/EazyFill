@@ -1,0 +1,59 @@
+name: eazyfill-node-b-workers
+
+x-eazyfill-worker-image: &eazyfill_worker_image ${EAZYFILL_IMAGE:-ghcr.io/jack101a/eazyfill:latest}
+
+x-eazyfill-node-b-worker-env: &eazyfill_node_b_worker_env
+  TZ: ${TZ:-Asia/Kolkata}
+  APP_ENV: ${APP_ENV:-production}
+  APP_MODE: ${APP_MODE:-normal}
+  APP_CONFIG_PATH: /app/backend/config/config.yaml
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  RUN_MIGRATIONS: "false"
+  RUN_BACKGROUND_TASKS: "false"
+  DB_TYPE: postgresql
+  LEGACY_DB_TYPE: postgresql
+  POSTGRES_HOST: ${NODE_A_POSTGRES_HOST}
+  POSTGRES_PORT: ${NODE_A_POSTGRES_PORT:-15432}
+  POSTGRES_DB: ${POSTGRES_DB:-eazyfill}
+  POSTGRES_USER: ${POSTGRES_USER:-eazyfill}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  REDIS_ENABLED: "true"
+  REDIS_URL: redis://:${REDIS_PASSWORD}@${NODE_A_REDIS_HOST}:${NODE_A_REDIS_PORT:-16379}/0
+  REDIS_PREFIX: ${REDIS_PREFIX:-eazyfill:}
+  SOLVER_QUEUE_BACKEND: redis
+  SOLVER_QUEUE_FALLBACK_LOCAL: "false"
+  SOLVER_JOB_TIMEOUT_SECONDS: ${SOLVER_JOB_TIMEOUT_SECONDS:-30}
+  SOLVER_JOB_ATTEMPTS: ${SOLVER_JOB_ATTEMPTS:-3}
+  SOLVER_RESULT_TTL_SECONDS: ${SOLVER_RESULT_TTL_SECONDS:-120}
+  SOLVER_WORKER_CONCURRENCY: ${SOLVER_WORKER_CONCURRENCY:-2}
+  AUTH_HASH_SALT: ${AUTH_HASH_SALT:-}
+  ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  ONNX_PATH: /app/data/models/model.onnx
+
+x-eazyfill-node-b-volumes: &eazyfill_node_b_volumes
+  - ${NODE_B_CONFIG_PATH:-/srv/ajaxhs/config/eazyfill-node-b}/logs:/app/backend/logs
+  - ${NODE_B_CONFIG_PATH:-/srv/ajaxhs/config/eazyfill-node-b}/data:/app/data
+  - ${NODE_B_CONFIG_PATH:-/srv/ajaxhs/config/eazyfill-node-b}/config:/app/backend/config
+
+services:
+  captcha-worker:
+    image: *eazyfill_worker_image
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *eazyfill_node_b_worker_env
+      INSTANCE_ID: ${INSTANCE_ID:-eazyfill-node-b-captcha-worker}
+    volumes: *eazyfill_node_b_volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      disable: true
+    networks:
+      - eazyfill-node-b-workers
+
+networks:
+  eazyfill-node-b-workers:
+    name: eazyfill-node-b-workers

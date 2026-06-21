@@ -61,6 +61,8 @@ _local_backup/
 .codex/
 .pytest_cache/
 .env
+.env.node-a-worker-access
+.env.node-b-workers
 .venv
 venv/
 .idea/

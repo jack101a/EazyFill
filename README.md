@@ -59,6 +59,8 @@ The canonical deployment path is:
 - `Dockerfile`
 - `docker-compose.yml`
 - optional `docker-compose.prod.yml`
+- optional `docker-compose.node-a-worker-access.yml` for remote worker access
+- optional `docker-compose.node-b-workers.yml` for a worker-only mini PC
 - `.env.example`
 
 The published image is:
@@ -71,4 +73,5 @@ Runtime data, database files, Redis data, backups, config, uploaded models, and
 learned mappings must live on host-mounted volumes under `CONFIG_PATH`. They
 are intentionally not committed or baked into the Docker image.
 
-See `DEPLOYMENT.md` for the Portainer checklist.
+See `DEPLOYMENT.md` for the Portainer checklist and
+`docs/node-b-workers.md` for the mini PC worker setup.
