@@ -145,15 +145,10 @@ services:
         aliases:
           - test-stack-eazyfill-gateway-2
 
-  api-haproxy:
+  api:
     image: ${EAZYFILL_HAPROXY_IMAGE:-ghcr.io/jack101a/eazyfill-haproxy:latest}
     restart: unless-stopped
     init: true
-    depends_on:
-      gateway-1:
-        condition: service_healthy
-      gateway-2:
-        condition: service_healthy
     ports:
       - "${PUBLIC_HTTP_BIND}:${PORT}:80"
     healthcheck:

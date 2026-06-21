@@ -78,7 +78,8 @@ Use `docker-compose.portainer-ha.yml` when Node A should mirror the older
 - `gateway-1` keeps normal API startup migrations enabled, then serves
   API/admin traffic.
 - `gateway-2` serves API/admin traffic after `gateway-1` is healthy.
-- `api-haproxy` publishes the public HTTP port and load-balances with `leastconn`.
+- `api` publishes the public HTTP port through the packaged HAProxy edge image
+  and load-balances with `leastconn`.
   Its HAProxy configuration is packaged from `deploy/haproxy/eazyfill.cfg`
   into `ghcr.io/jack101a/eazyfill-haproxy`, keeping the compose file small.
 - `/v2/auth/*` is pinned to `gateway-1` because OTP challenges are currently
