@@ -61,6 +61,7 @@ _local_backup/
 .codex/
 .pytest_cache/
 .env
+.env.portainer-ha
 .env.node-a-worker-access
 .env.node-b-workers
 .venv

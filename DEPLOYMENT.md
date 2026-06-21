@@ -5,6 +5,7 @@ This repository has one canonical production Docker path:
 - `Dockerfile`
 - `docker-compose.yml`
 - optional production overrides in `docker-compose.prod.yml`
+- optional Portainer HA topology in `docker-compose.portainer-ha.yml`
 - optional Node A remote-worker sidecar in `docker-compose.node-a-worker-access.yml`
 - optional Node B worker-only stack in `docker-compose.node-b-workers.yml`
 - `.env.example`
@@ -68,6 +69,31 @@ Required public URL:
 The API container runs Alembic migrations by default on startup. Worker and
 scheduler containers set `RUN_MIGRATIONS=false`.
 
+## Portainer HA Stack
+
+Use `docker-compose.portainer-ha.yml` when Node A should mirror the older
+`sa-helper-test2` topology:
+
+- `gateway-1` keeps normal API startup migrations enabled, then serves
+  API/admin traffic.
+- `gateway-2` serves API/admin traffic after `gateway-1` is healthy.
+- `api-haproxy` publishes the public HTTP port and load-balances with `leastconn`.
+- `/v2/auth/*` is pinned to `gateway-1` because OTP challenges are currently
+  process-memory backed. Move OTP challenge storage to Redis before balancing
+  auth requests across multiple gateways.
+- `captcha-worker` and `captcha-worker-2` run two Node A workers, matching the
+  old Node A worker capacity without relying on Portainer `scale` handling.
+- `scheduler` runs backup and subscription background loops.
+- Postgres and Redis are bound to private Node A ports for Node B workers with
+  `PG_BIND`/`PG_HOST_PORT` and `REDIS_BIND`/`REDIS_HOST_PORT`.
+
+Validate it locally before pasting it into Portainer:
+
+```bash
+docker compose --env-file .env.portainer-ha.example \
+  -f docker-compose.portainer-ha.yml config --quiet
+```
+
 ## Node B Distributed CAPTCHA Workers
 
 EazyFill can distribute CAPTCHA solving to a second machine. Node A stays the
@@ -79,7 +105,8 @@ The detailed runbook is in `docs/node-b-workers.md`.
 Use a private network between Node A and Node B, such as WireGuard or Tailscale.
 Do not expose Redis or Postgres on a public interface.
 
-On Node A, deploy the worker-access sidecar as a small separate stack:
+If Node A is running the normal single-API compose, deploy the worker-access
+sidecar as a small separate stack:
 
 ```bash
 EAZYFILL_NODE_A_DOCKER_NETWORK=eazyfill-network
@@ -104,6 +131,16 @@ defaults in `.env.node-a-worker-access.example`:
 EAZYFILL_NODE_A_DOCKER_NETWORK=test-stack-eazyfill-network
 NODE_A_POSTGRES_INTERNAL_HOST=test-stack-eazyfill-postgres
 NODE_A_REDIS_INTERNAL_HOST=test-stack-eazyfill-redis
+```
+
+If Node A is running `docker-compose.portainer-ha.yml`, do not add the sidecar.
+The HA stack already exposes Postgres and Redis on the private/VPN bind values:
+
+```env
+PG_BIND=10.99.0.1
+PG_HOST_PORT=15432
+REDIS_BIND=10.99.0.1
+REDIS_HOST_PORT=16379
 ```
 
 On Node B, deploy `docker-compose.node-b-workers.yml` with environment values
@@ -134,6 +171,7 @@ if CPU and memory have headroom.
 
 ```bash
 docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+docker compose --env-file .env.portainer-ha.example -f docker-compose.portainer-ha.yml config --quiet
 docker compose --env-file .env.node-a-worker-access.example -f docker-compose.node-a-worker-access.yml config --quiet
 docker compose --env-file .env.node-b-workers.example -f docker-compose.node-b-workers.yml config --quiet
 python -m compileall -q backend/app backend/migrations

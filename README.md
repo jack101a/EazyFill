@@ -59,6 +59,7 @@ The canonical deployment path is:
 - `Dockerfile`
 - `docker-compose.yml`
 - optional `docker-compose.prod.yml`
+- optional `docker-compose.portainer-ha.yml` for Node A HA with HAProxy, two gateways, scheduler, and scaled CAPTCHA workers
 - optional `docker-compose.node-a-worker-access.yml` for remote worker access
 - optional `docker-compose.node-b-workers.yml` for a worker-only mini PC
 - `.env.example`

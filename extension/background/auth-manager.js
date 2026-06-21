@@ -36,7 +36,7 @@ export function createAuthManager({ apiClient }) {
   }
 
   async function verifyApiKey(apiKey) {
-    const response = await apiClient.post("/v2/auth/verify-key", { api_key: apiKey }, { retry: false });
+    const response = await apiClient.post("/v2/auth/verify-key", { api_key: apiKey }, { retry: false, skipAuth: true });
     return normalizeVerification(response);
   }
 
@@ -95,7 +95,7 @@ export function createAuthManager({ apiClient }) {
       mobile: payload.mobile || "",
       name: payload.name || "",
       plan_code: payload.planCode || payload.plan_code || "free"
-    }, { retry: false });
+    }, { retry: false, skipAuth: true });
     return { ok: true, ...response };
   }
 
@@ -104,7 +104,7 @@ export function createAuthManager({ apiClient }) {
       challenge_id: payload.challengeId || payload.challenge_id || "",
       otp: payload.otp || "",
       device_name: payload.deviceName || payload.device_name || "EazyFill Extension"
-    }, { retry: false });
+    }, { retry: false, skipAuth: true });
     const apiKey = sanitizeApiKey(response.api_key);
     if (!apiKey) throw new Error("OTP verified but no API key was returned");
     const verification = normalizeVerification(response);

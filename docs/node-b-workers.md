@@ -14,7 +14,7 @@ Extension -> Node A API -> Node A Redis queue -> Node B worker
 Node B also connects to Node A Postgres during startup and for model-routing
 schema validation. Node B must have the same ONNX model files locally.
 
-## Node A: Worker-Access Sidecar
+## Node A: Worker Access
 
 The current live Portainer stack discovered on Node A is:
 
@@ -23,8 +23,19 @@ The current live Portainer stack discovered on Node A is:
 - Postgres alias: `test-stack-eazyfill-postgres`
 - Redis alias: `test-stack-eazyfill-redis`
 
-Create a new small Portainer stack on Node A, for example
-`eazyfill-node-a-worker-access`, using:
+If Node A is running `docker-compose.portainer-ha.yml`, do not create another
+worker-access sidecar. The HA stack already exposes private/VPN Postgres and
+Redis ports:
+
+```env
+PG_BIND=10.99.0.1
+PG_HOST_PORT=15432
+REDIS_BIND=10.99.0.1
+REDIS_HOST_PORT=16379
+```
+
+If Node A is running the normal single-API compose, create a small Portainer
+stack on Node A, for example `eazyfill-node-a-worker-access`, using:
 
 - compose file: `docker-compose.node-a-worker-access.yml`
 - env file template: `.env.node-a-worker-access.example`

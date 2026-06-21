@@ -96,6 +96,28 @@ response = await send({
 assert.equal(response.ok, true);
 assert.equal(response.data.fp_auth.apiKey, "fp_test_secret");
 
+const apiClientUrl = pathToFileURL(path.join(root, "extension/background/api-client.js"));
+const { createApiClient } = await import(apiClientUrl);
+const originalFetch = globalThis.fetch;
+const capturedRequests = [];
+globalThis.fetch = async (url, init = {}) => {
+  capturedRequests.push({ url, init });
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  });
+};
+try {
+  const apiClient = createApiClient({ baseUrl: "https://api.test" });
+  await apiClient.post("/v2/protected", {}, { retry: false });
+  await apiClient.post("/v2/auth/register", {}, { retry: false, skipAuth: true });
+  assert.equal(capturedRequests[0].init.headers["X-Api-Key"], "fp_test_secret");
+  assert.equal(capturedRequests[1].init.headers["X-Api-Key"], undefined);
+  assert.ok(capturedRequests[1].init.headers["X-EazyFill-Device-Id"]);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 response = await send({
   type: "SET_EXTENSION_STORAGE",
   values: { fp_settings: { autofillEnabled: false } }

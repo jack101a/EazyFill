@@ -1,0 +1,295 @@
+x-app-env: &app_env
+  TZ: ${TZ}
+  APP_CONFIG_PATH: ${APP_CONFIG_PATH}
+  APP_MODE: ${APP_MODE}
+  APP_ENV: ${APP_ENV}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+  RUN_BACKGROUND_TASKS: ${RUN_BACKGROUND_TASKS}
+  DB_TYPE: ${DB_TYPE}
+  LEGACY_DB_TYPE: ${LEGACY_DB_TYPE}
+  POSTGRES_HOST: ${PGHOST}
+  POSTGRES_PORT: ${PGPORT}
+  POSTGRES_DB: ${PGDATABASE}
+  POSTGRES_USER: ${PGUSER}
+  POSTGRES_PASSWORD: ${PGPASSWORD}
+  REDIS_ENABLED: ${REDIS_ENABLED}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
+  REDIS_PREFIX: ${REDIS_PREFIX}
+  SOLVER_QUEUE_BACKEND: ${SOLVER_QUEUE_BACKEND}
+  SOLVER_QUEUE_FALLBACK_LOCAL: ${SOLVER_QUEUE_FALLBACK_LOCAL}
+  SOLVER_JOB_TIMEOUT_SECONDS: ${SOLVER_JOB_TIMEOUT_SECONDS}
+  SOLVER_JOB_ATTEMPTS: ${SOLVER_JOB_ATTEMPTS}
+  SOLVER_RESULT_TTL_SECONDS: ${SOLVER_RESULT_TTL_SECONDS}
+  AUTH_HASH_SALT: ${AUTH_HASH_SALT}
+  ADMIN_TOKEN: ${ADMIN_TOKEN}
+  ADMIN_USERNAME: ${ADMIN_USERNAME}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+  RAZORPAY_ORDER_TOKEN: ${RAZORPAY_ORDER_TOKEN}
+  OTP_EMAIL_ENABLED: ${OTP_EMAIL_ENABLED}
+  OTP_EMAIL_PROVIDER: ${OTP_EMAIL_PROVIDER}
+  BREVO_API_KEY: ${BREVO_API_KEY}
+  OTP_EMAIL_FROM: ${OTP_EMAIL_FROM}
+  OTP_EMAIL_FROM_NAME: ${OTP_EMAIL_FROM_NAME}
+  OTP_EMAIL_REPLY_TO: ${OTP_EMAIL_REPLY_TO}
+  OTP_DEV_OTP_ENABLED: ${OTP_DEV_OTP_ENABLED}
+  DISCORD_NOTIFY_ENABLED: ${DISCORD_NOTIFY_ENABLED}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+
+x-app-volumes: &app_volumes
+  - ${CONFIG_PATH}/test-stack-eazyfill/logs:/app/backend/logs
+  - ${CONFIG_PATH}/test-stack-eazyfill/backups:/app/backend/backups
+  - ${CONFIG_PATH}/test-stack-eazyfill/data:/app/data
+  - ${CONFIG_PATH}/test-stack-eazyfill/config:/app/backend/config
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: ${TZ}
+      POSTGRES_DB: ${PGDATABASE}
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+    volumes:
+      - ${CONFIG_PATH}/test-stack-eazyfill/postgres16:/var/lib/postgresql/data
+    ports:
+      - "${PG_BIND:-127.0.0.1}:${PG_HOST_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 20s
+      timeout: 10s
+      start_period: 10s
+      retries: 8
+    networks:
+      default:
+        aliases:
+          - test-stack-eazyfill-postgres
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    init: true
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      TZ: ${TZ}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ${CONFIG_PATH}/test-stack-eazyfill/redis:/data
+    ports:
+      - "${REDIS_BIND:-127.0.0.1}:${REDIS_HOST_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
+      interval: 20s
+      timeout: 10s
+      start_period: 5s
+      retries: 8
+    networks:
+      default:
+        aliases:
+          - test-stack-eazyfill-redis
+
+  gateway-1:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app_env
+      INSTANCE_ID: node-a-gateway-1
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS}
+      RUN_BACKGROUND_TASKS: "false"
+    volumes: *app_volumes
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 20s
+      timeout: 10s
+      start_period: 30s
+      retries: 8
+    networks:
+      default:
+        aliases:
+          - test-stack-eazyfill-gateway-1
+
+  gateway-2:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      gateway-1:
+        condition: service_healthy
+    environment:
+      <<: *app_env
+      INSTANCE_ID: node-a-gateway-2
+      RUN_MIGRATIONS: "false"
+      RUN_BACKGROUND_TASKS: "false"
+    volumes: *app_volumes
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 20s
+      timeout: 10s
+      start_period: 30s
+      retries: 8
+    networks:
+      default:
+        aliases:
+          - test-stack-eazyfill-gateway-2
+
+  api-haproxy:
+    image: haproxy:2.9-alpine
+    restart: unless-stopped
+    init: true
+    depends_on:
+      gateway-1:
+        condition: service_healthy
+      gateway-2:
+        condition: service_healthy
+    environment:
+      HAPROXY_NODE_B_GATEWAY: ${HAPROXY_NODE_B_GATEWAY:-}
+      HAPROXY_NODE_B_BACKUP: ${HAPROXY_NODE_B_BACKUP:-true}
+      HAPROXY_NODE_B_WEIGHT: ${HAPROXY_NODE_B_WEIGHT:-1}
+    ports:
+      - "${PUBLIC_HTTP_BIND}:${PORT}:80"
+    command:
+      - sh
+      - -lc
+      - |
+        cat > /tmp/haproxy.cfg <<'EOF'
+        global
+            log stdout format raw local0
+            maxconn 4096
+
+        defaults
+            mode http
+            log global
+            option httplog
+            option dontlognull
+            option forwardfor
+            timeout connect 10s
+            timeout client 120s
+            timeout server 120s
+
+        resolvers docker
+            nameserver dns 127.0.0.11:53
+            resolve_retries 3
+            timeout resolve 1s
+            timeout retry 1s
+            hold valid 10s
+
+        frontend http_in
+            bind *:80
+            http-request set-header X-Forwarded-Proto http unless { req.hdr(X-Forwarded-Proto) -m found }
+            http-request set-header X-Real-IP %[src] unless { req.hdr(X-Real-IP) -m found }
+            acl auth_path path_beg /v2/auth
+            use_backend eazyfill_auth_api if auth_path
+            default_backend eazyfill_api
+
+        backend eazyfill_auth_api
+            option httpchk GET /ready
+            http-check expect status 200
+            server gateway1 test-stack-eazyfill-gateway-1:8080 check inter 5s fall 3 rise 2 resolvers docker init-addr libc,none
+
+        backend eazyfill_api
+            balance leastconn
+            option httpchk GET /ready
+            http-check expect status 200
+            server gateway1 test-stack-eazyfill-gateway-1:8080 check inter 5s fall 3 rise 2 resolvers docker init-addr libc,none
+            server gateway2 test-stack-eazyfill-gateway-2:8080 check inter 5s fall 3 rise 2 resolvers docker init-addr libc,none
+        EOF
+        if [ -n "$${HAPROXY_NODE_B_GATEWAY:-}" ]; then
+          node_b_mode=""
+          if [ "$${HAPROXY_NODE_B_BACKUP:-true}" = "true" ] || [ "$${HAPROXY_NODE_B_BACKUP:-true}" = "1" ]; then
+            node_b_mode="backup"
+          else
+            node_b_mode="weight $${HAPROXY_NODE_B_WEIGHT:-1}"
+          fi
+          printf '    server nodeb %s check inter 5s fall 3 rise 2 %s\n' "$${HAPROXY_NODE_B_GATEWAY}" "$${node_b_mode}" >> /tmp/haproxy.cfg
+        fi
+        exec haproxy -W -db -f /tmp/haproxy.cfg
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      start_period: 5s
+      retries: 5
+    networks:
+      default:
+        aliases:
+          - test-stack-eazyfill-haproxy
+
+  captcha-worker:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *app_env
+      INSTANCE_ID: node-a-captcha-worker-1
+      RUN_MIGRATIONS: "false"
+      RUN_BACKGROUND_TASKS: "false"
+      SOLVER_WORKER_CONCURRENCY: ${SOLVER_WORKER_CONCURRENCY}
+    volumes: *app_volumes
+    networks:
+      - default
+
+  captcha-worker-2:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *app_env
+      INSTANCE_ID: node-a-captcha-worker-2
+      RUN_MIGRATIONS: "false"
+      RUN_BACKGROUND_TASKS: "false"
+      SOLVER_WORKER_CONCURRENCY: ${SOLVER_WORKER_CONCURRENCY}
+    volumes: *app_volumes
+    networks:
+      - default
+
+  scheduler:
+    image: ${SA_HELPER_IMAGE}
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
+    depends_on:
+      gateway-1:
+        condition: service_healthy
+    command: ["python", "-m", "app.scheduler"]
+    environment:
+      <<: *app_env
+      INSTANCE_ID: node-a-scheduler
+      RUN_MIGRATIONS: "false"
+      RUN_BACKGROUND_TASKS: "false"
+    volumes: *app_volumes
+    networks:
+      - default
+
+networks:
+  default:
+    name: test-stack-eazyfill-network

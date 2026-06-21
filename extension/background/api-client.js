@@ -52,7 +52,7 @@ export function createApiClient(options = {}) {
       "X-EazyFill-Device-Id": context.deviceId,
       ...(requestOptions.headers || {})
     };
-    if (context.apiKey) headers["X-Api-Key"] = context.apiKey;
+    if (context.apiKey && requestOptions.skipAuth !== true) headers["X-Api-Key"] = context.apiKey;
 
     try {
       const response = await fetch(url, {
