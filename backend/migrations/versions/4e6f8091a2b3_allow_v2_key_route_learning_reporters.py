@@ -31,6 +31,10 @@ def _columns(table_name: str) -> set[str]:
     return {column["name"] for column in _inspector().get_columns(table_name)}
 
 
+def _is_sqlite() -> bool:
+    return op.get_bind().dialect.name == "sqlite"
+
+
 def _drop_reported_by_foreign_keys(table_name: str) -> None:
     if not _table_exists(table_name):
         return
@@ -59,7 +63,11 @@ def _ensure_reporter_columns(table_name: str) -> None:
     if "reported_by_user_id" not in cols:
         op.add_column(table_name, sa.Column("reported_by_user_id", sa.Integer(), nullable=True))
     if "reported_by" in cols:
-        op.alter_column(table_name, "reported_by", existing_type=sa.Integer(), nullable=True)
+        if _is_sqlite():
+            with op.batch_alter_table(table_name) as batch_op:
+                batch_op.alter_column("reported_by", existing_type=sa.Integer(), nullable=True)
+        else:
+            op.alter_column(table_name, "reported_by", existing_type=sa.Integer(), nullable=True)
 
 
 def upgrade() -> None:

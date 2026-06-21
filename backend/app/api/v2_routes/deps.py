@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 from fastapi import Header, HTTPException, Request
 
 from app.core.db import get_session
-from app.core.models import SubscriptionPlan, User, UserSubscription
+from app.core.models import SubscriptionPlan, User, UserSession, UserSubscription
 
 
 @dataclass
@@ -61,7 +62,7 @@ def _device_id(request: Request, explicit: str | None = None) -> str:
     return f"ua:{ua[:180]}" if ua else "ua:unknown"
 
 
-def _load_user_context(record: dict[str, Any], api_key: str, device_id: str) -> V2AuthContext:
+def _load_user_context(record: dict[str, Any], api_key: str, device_id: str, *, key_kind: str = "user") -> V2AuthContext:
     user_id = int(record.get("user_id") or 0)
     session = get_session()
     try:
@@ -81,7 +82,7 @@ def _load_user_context(record: dict[str, Any], api_key: str, device_id: str) -> 
             api_key=api_key,
             device_id=device_id,
             record=record,
-            key_kind="user",
+            key_kind=key_kind,
             user=user,
             subscription=sub,
             plan=plan,
@@ -97,15 +98,56 @@ def _auth_error(status_code: int, code: str, message: str) -> HTTPException:
 async def validate_v2_key(
     request: Request,
     x_api_key: str = Header(default="", alias="X-Api-Key"),
+    x_eazyfill_session: str = Header(default="", alias="X-EazyFill-Session"),
     x_eazyfill_device_id: str = Header(default="", alias="X-EazyFill-Device-Id"),
     x_flowpilot_device_id: str = Header(default="", alias="X-FlowPilot-Device-Id"),
 ) -> V2AuthContext:
-    api_key = str(x_api_key or "").strip()
+    api_key = str(x_api_key or "").strip() if isinstance(x_api_key, str) else ""
+    explicit_device = ""
+    if isinstance(x_eazyfill_device_id, str) and x_eazyfill_device_id:
+        explicit_device = x_eazyfill_device_id
+    elif isinstance(x_flowpilot_device_id, str) and x_flowpilot_device_id:
+        explicit_device = x_flowpilot_device_id
+    device_id = _device_id(request, explicit_device)
+    container = request.app.state.container
+    session_token = str(x_eazyfill_session or "").strip() if isinstance(x_eazyfill_session, str) else ""
+    auth_header = request.headers.get("authorization", "").strip()
+    if not session_token and auth_header.lower().startswith("bearer "):
+        session_token = auth_header.split(" ", 1)[1].strip()
+    if session_token:
+        session_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        session = get_session()
+        try:
+            now = _utcnow()
+            record = (
+                session.query(UserSession)
+                .filter(UserSession.session_hash == session_hash, UserSession.status == "active")
+                .first()
+            )
+            if not record:
+                raise _auth_error(401, "invalid_session", "Sign in again to continue")
+            if record.expires_at and record.expires_at <= now:
+                record.status = "expired"
+                record.revoked_at = now
+                record.revoke_reason = "expired"
+                session.commit()
+                raise _auth_error(401, "session_expired", "Sign in again to continue")
+            if record.device_id != device_id:
+                raise _auth_error(401, "device_mismatch", "This browser is not authorized for the account")
+            record.last_seen_at = now
+            session.commit()
+            session_record = {
+                "id": record.id,
+                "user_id": record.user_id,
+                "name": "EazyFill Session",
+                "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+            }
+            return _load_user_context(session_record, "", device_id, key_kind="session")
+        finally:
+            session.close()
+
     if not api_key:
         raise _auth_error(401, "invalid_key", "Sign in is required")
-
-    device_id = _device_id(request, x_eazyfill_device_id or x_flowpilot_device_id)
-    container = request.app.state.container
 
     user_key_service = getattr(container, "user_key_service", None)
     if user_key_service is not None:

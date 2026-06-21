@@ -56,7 +56,7 @@
           <div class="auth-head">
             <div>
               <div class="eyebrow">Account</div>
-              <h2 id="popup-auth-title">Sign in</h2>
+              <h2 id="popup-auth-title">Sign in / Sign up</h2>
             </div>
             <button id="popup-auth-close" class="mini-icon-button" type="button" aria-label="Close account login" title="Close">
               <span aria-hidden="true"></span>
@@ -64,21 +64,21 @@
           </div>
           <div class="auth-form">
             <label>
-              Name
-              <input id="popup-auth-name" type="text" placeholder="Needed for new accounts" autocomplete="name">
-            </label>
-            <label>
               Email
               <input id="popup-auth-email" type="email" placeholder="you@gmail.com" autocomplete="email" required>
+            </label>
+            <label id="popup-auth-name-row" hidden style="display: none;">
+              Name
+              <input id="popup-auth-name" type="text" placeholder="Full name" autocomplete="name">
             </label>
             <div class="auth-actions">
               <button id="popup-send-otp" class="button primary" type="button">Continue</button>
             </div>
-            <label>
+            <label id="popup-auth-otp-row" hidden style="display: none;">
               Verification code
               <input id="popup-auth-otp" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" disabled>
             </label>
-            <button id="popup-verify-otp" class="button secondary full-width" type="button" disabled>Verify</button>
+            <button id="popup-verify-otp" class="button secondary full-width" type="button" disabled hidden style="display: none;">Verify</button>
             <p id="popup-auth-message" class="auth-message" role="status" aria-live="polite"></p>
           </div>
         </section>

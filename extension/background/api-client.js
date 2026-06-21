@@ -24,6 +24,7 @@ async function readClientContext() {
   const data = await getExtensionStorage(["fp_auth", "fp_settings"]);
   return {
     apiKey: String(data.fp_auth?.apiKey || "").trim(),
+    sessionToken: String(data.fp_auth?.sessionToken || data.fp_auth?.session_token || "").trim(),
     baseUrl: trimBaseUrl(data.fp_settings?.apiBaseUrl || DEFAULT_API_BASE),
     deviceId: await getDeviceId()
   };
@@ -52,7 +53,10 @@ export function createApiClient(options = {}) {
       "X-EazyFill-Device-Id": context.deviceId,
       ...(requestOptions.headers || {})
     };
-    if (context.apiKey && requestOptions.skipAuth !== true) headers["X-Api-Key"] = context.apiKey;
+    if (requestOptions.skipAuth !== true) {
+      if (context.sessionToken) headers["X-EazyFill-Session"] = context.sessionToken;
+      else if (context.apiKey) headers["X-Api-Key"] = context.apiKey;
+    }
 
     try {
       const response = await fetch(url, {

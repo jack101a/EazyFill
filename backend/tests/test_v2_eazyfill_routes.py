@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import hmac
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -192,6 +192,94 @@ def _app(ctx: V2AuthContext | None = None, *, quota_allowed: bool = True) -> Fas
     return app
 
 
+def _install_auth_challenge_store(monkeypatch, auth_route, *, existing_identifiers: set[tuple[str, str]] | None = None):
+    store = {}
+    existing_identifiers = existing_identifiers or set()
+
+    class FakeSession:
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_user_for_identifier(_session, identifier_type, identifier):
+        if (identifier_type, identifier) in existing_identifiers:
+            return SimpleNamespace(id=42)
+        return None
+
+    def fake_purge(_session):
+        now = auth_route._utcnow_naive()
+        for challenge in store.values():
+            if challenge.status == "pending" and challenge.expires_at <= now:
+                challenge.status = "expired"
+
+    def fake_drop(_session, identifier_type, identifier):
+        for challenge in store.values():
+            if (
+                challenge.status == "pending"
+                and challenge.identifier_type == identifier_type
+                and challenge.identifier == identifier
+            ):
+                challenge.status = "replaced"
+
+    def fake_create(_session, _request, *, identifier_type, identifier, name, plan_code, otp, account_mode):
+        now = auth_route._utcnow_naive()
+        challenge = SimpleNamespace(
+            challenge_id=f"challenge-{len(store) + 1}",
+            identifier_type=identifier_type,
+            identifier=identifier,
+            account_mode=account_mode,
+            name=name,
+            plan_code=plan_code,
+            otp_hash=auth_route._otp_hash(otp),
+            status="pending",
+            attempts=0,
+            expires_at=now + timedelta(seconds=auth_route.OTP_TTL_SECONDS),
+            consumed_at=None,
+            updated_at=now,
+        )
+        store[challenge.challenge_id] = challenge
+        return challenge
+
+    def fake_load(_session, challenge_id):
+        challenge = store.get(challenge_id)
+        if challenge and challenge.status == "pending":
+            return challenge
+        return None
+
+    def fake_mark_status(challenge_id, status):
+        if challenge_id in store:
+            store[challenge_id].status = status
+
+    monkeypatch.setattr(auth_route, "get_session", lambda: FakeSession())
+    monkeypatch.setattr(auth_route, "_user_for_identifier", fake_user_for_identifier)
+    monkeypatch.setattr(auth_route, "_purge_expired_challenges", fake_purge)
+    monkeypatch.setattr(auth_route, "_drop_existing_identifier_challenges", fake_drop)
+    monkeypatch.setattr(auth_route, "_create_auth_challenge", fake_create)
+    monkeypatch.setattr(auth_route, "_load_pending_challenge", fake_load)
+    monkeypatch.setattr(auth_route, "_mark_challenge_status", fake_mark_status)
+    monkeypatch.setattr(
+        auth_route,
+        "_issue_user_session",
+        lambda *_args, **_kwargs: (
+            "efs_test_session",
+            {
+                "id": 11,
+                "device_id": _kwargs.get("device_id", "device-1"),
+                "status": "active",
+                "issued_at": "2026-06-22T00:00:00",
+                "expires_at": "2026-09-20T00:00:00",
+                "last_seen_at": "2026-06-22T00:00:00",
+            },
+        ),
+    )
+    return store
+
+
 def test_v2_verify_key_returns_eazyfill_contract(monkeypatch):
     from app.api.v2_routes import auth as auth_route
 
@@ -215,16 +303,6 @@ def test_v2_verify_key_returns_eazyfill_contract(monkeypatch):
 def test_v2_auth_register_and_verify_otp_issues_key(monkeypatch):
     from app.api.v2_routes import auth as auth_route
 
-    class FakeSession:
-        def commit(self):
-            return None
-
-        def rollback(self):
-            return None
-
-        def close(self):
-            return None
-
     created_key = SimpleNamespace(id=7)
 
     async def fake_validate_v2_key(*_args, **_kwargs):
@@ -236,7 +314,7 @@ def test_v2_auth_register_and_verify_otp_issues_key(monkeypatch):
         email=SimpleNamespace(otp_dev_otp_enabled=True),
     )
     app.state.container.user_key_service.create_key.return_value = (created_key, "fp_created")
-    monkeypatch.setattr(auth_route, "get_session", lambda: FakeSession())
+    store = _install_auth_challenge_store(monkeypatch, auth_route)
     monkeypatch.setattr(auth_route, "_create_or_update_user", lambda _session, _challenge: SimpleNamespace(id=42))
     monkeypatch.setattr(auth_route, "_ensure_subscription", lambda *_args, **_kwargs: SimpleNamespace(id=3))
     monkeypatch.setattr(auth_route, "validate_v2_key", fake_validate_v2_key)
@@ -258,12 +336,17 @@ def test_v2_auth_register_and_verify_otp_issues_key(monkeypatch):
     assert verify.status_code == 200
     body = verify.json()
     assert body["api_key"] == "fp_created"
+    assert body["session_token"] == "efs_test_session"
+    assert body["session"]["status"] == "active"
     assert body["valid"] is True
+    assert store[challenge["challenge_id"]].status == "consumed"
     app.state.container.user_key_service.create_key.assert_called_once_with(42)
     app.state.container.user_key_service.bind_device.assert_called_once()
 
 
-def test_v2_auth_register_sends_email_otp_without_dev_code():
+def test_v2_auth_register_sends_email_otp_without_dev_code(monkeypatch):
+    from app.api.v2_routes import auth as auth_route
+
     app = _app()
     email_service = SimpleNamespace(enabled=True, send_otp_email=AsyncMock(return_value=SimpleNamespace(message_id="msg-1")))
     app.state.container.email_service = email_service
@@ -271,6 +354,7 @@ def test_v2_auth_register_sends_email_otp_without_dev_code():
         server=SimpleNamespace(debug=False),
         email=SimpleNamespace(otp_dev_otp_enabled=False),
     )
+    _install_auth_challenge_store(monkeypatch, auth_route)
 
     response = TestClient(app).post("/v2/auth/register", json={"email": "user@gmail.com", "name": "Eazy User"})
 
@@ -293,7 +377,7 @@ def test_v2_auth_register_allows_existing_user_login_without_name(monkeypatch):
         server=SimpleNamespace(debug=False),
         email=SimpleNamespace(otp_dev_otp_enabled=False),
     )
-    monkeypatch.setattr(auth_route, "_identifier_belongs_to_existing_user", lambda *_args: True)
+    _install_auth_challenge_store(monkeypatch, auth_route, existing_identifiers={("email", "existing@gmail.com")})
 
     response = TestClient(app).post("/v2/auth/register", json={"email": "existing@gmail.com"})
 
@@ -314,7 +398,7 @@ def test_v2_auth_register_requires_name_for_new_account(monkeypatch):
         server=SimpleNamespace(debug=False),
         email=SimpleNamespace(otp_dev_otp_enabled=False),
     )
-    monkeypatch.setattr(auth_route, "_identifier_belongs_to_existing_user", lambda *_args: False)
+    _install_auth_challenge_store(monkeypatch, auth_route)
 
     response = TestClient(app).post("/v2/auth/register", json={"email": "newuser@gmail.com"})
 
@@ -335,7 +419,7 @@ def test_v2_auth_register_rate_limits_repeated_otp_requests(monkeypatch):
     )
     monkeypatch.setattr(auth_route, "OTP_REGISTER_MAX_PER_IDENTIFIER", 2)
     auth_route._OTP_REGISTER_EVENTS.clear()
-    auth_route._OTP_CHALLENGES.clear()
+    _install_auth_challenge_store(monkeypatch, auth_route)
 
     client = TestClient(app)
     payload = {"email": "limited@gmail.com", "name": "Eazy User"}
@@ -348,7 +432,9 @@ def test_v2_auth_register_rate_limits_repeated_otp_requests(monkeypatch):
     assert response.json()["detail"]["error"] == "otp_rate_limited"
 
 
-def test_v2_auth_register_uses_shared_rate_limiter_when_available():
+def test_v2_auth_register_uses_shared_rate_limiter_when_available(monkeypatch):
+    from app.api.v2_routes import auth as auth_route
+
     app = _app()
     email_service = SimpleNamespace(enabled=True, send_otp_email=AsyncMock(return_value=SimpleNamespace(message_id="msg-1")))
     app.state.container.email_service = email_service
@@ -357,6 +443,7 @@ def test_v2_auth_register_uses_shared_rate_limiter_when_available():
         email=SimpleNamespace(otp_dev_otp_enabled=False),
     )
     app.state.container.rate_limiter = SimpleNamespace(check=AsyncMock(side_effect=[True, True]))
+    _install_auth_challenge_store(monkeypatch, auth_route)
 
     response = TestClient(app).post("/v2/auth/register", json={"email": "shared@gmail.com", "name": "Eazy User"})
 
@@ -371,7 +458,9 @@ def test_v2_auth_register_uses_shared_rate_limiter_when_available():
     )
 
 
-def test_v2_auth_register_shared_rate_limiter_blocks_without_sending_email():
+def test_v2_auth_register_shared_rate_limiter_blocks_without_sending_email(monkeypatch):
+    from app.api.v2_routes import auth as auth_route
+
     app = _app()
     email_service = SimpleNamespace(enabled=True, send_otp_email=AsyncMock(return_value=SimpleNamespace(message_id="msg-1")))
     app.state.container.email_service = email_service
@@ -380,6 +469,7 @@ def test_v2_auth_register_shared_rate_limiter_blocks_without_sending_email():
         email=SimpleNamespace(otp_dev_otp_enabled=False),
     )
     app.state.container.rate_limiter = SimpleNamespace(check=AsyncMock(side_effect=[True, False]))
+    _install_auth_challenge_store(monkeypatch, auth_route)
 
     response = TestClient(app).post("/v2/auth/register", json={"email": "blocked@gmail.com", "name": "Eazy User"})
 
@@ -388,7 +478,7 @@ def test_v2_auth_register_shared_rate_limiter_blocks_without_sending_email():
     email_service.send_otp_email.assert_not_awaited()
 
 
-def test_v2_auth_register_keeps_only_latest_otp_challenge():
+def test_v2_auth_register_keeps_only_latest_otp_challenge(monkeypatch):
     app = _app()
     email_service = SimpleNamespace(enabled=True, send_otp_email=AsyncMock(return_value=SimpleNamespace(message_id="msg-1")))
     app.state.container.email_service = email_service
@@ -400,15 +490,15 @@ def test_v2_auth_register_keeps_only_latest_otp_challenge():
     from app.api.v2_routes import auth as auth_route
 
     auth_route._OTP_REGISTER_EVENTS.clear()
-    auth_route._OTP_CHALLENGES.clear()
+    store = _install_auth_challenge_store(monkeypatch, auth_route)
     client = TestClient(app)
 
     first = client.post("/v2/auth/register", json={"email": "latest@gmail.com", "name": "Eazy User"}).json()
     second = client.post("/v2/auth/register", json={"email": "latest@gmail.com", "name": "Eazy User"}).json()
 
     assert first["challenge_id"] != second["challenge_id"]
-    assert first["challenge_id"] not in auth_route._OTP_CHALLENGES
-    assert second["challenge_id"] in auth_route._OTP_CHALLENGES
+    assert store[first["challenge_id"]].status == "replaced"
+    assert store[second["challenge_id"]].status == "pending"
 
 
 def test_v2_auth_register_rejects_unsupported_email_domain():

@@ -10,19 +10,37 @@ function keyPrefix(apiKey) {
   return clean.length <= 12 ? clean : `${clean.slice(0, 8)}...${clean.slice(-4)}`;
 }
 
+function hasCredential(auth = {}) {
+  return !!String(auth.sessionToken || auth.apiKey || "").trim();
+}
+
 function authSnapshot(auth = {}) {
+  const authenticated = hasCredential(auth) && auth.valid !== false;
   return {
-    authenticated: !!auth.apiKey && auth.valid !== false,
-    valid: auth.valid !== false && !!auth.apiKey,
-    keyPrefix: auth.keyPrefix || keyPrefix(auth.apiKey),
+    authenticated,
+    valid: auth.valid !== false && hasCredential(auth),
+    keyPrefix: auth.keyPrefix || (auth.apiKey ? keyPrefix(auth.apiKey) : "Session"),
     user: auth.user || null,
     plan: auth.plan || null,
     credits: auth.credits || null,
     device: auth.device || null,
+    session: auth.session || null,
+    sessionToken: auth.sessionToken || "",
     syncSecret: auth.syncSecret || "",
     lastVerifiedAt: auth.lastVerifiedAt || null,
     lastError: auth.lastError || ""
   };
+}
+
+async function disableAccountGatedState() {
+  const data = await getExtensionStorage(["fp_settings"]).catch(() => ({}));
+  await setExtensionStorage({
+    fp_settings: {
+      ...(data.fp_settings || {}),
+      syncEnabled: false
+    }
+  });
+  await chrome.storage.local.remove(["fp_credits", "fp_sync_meta"]);
 }
 
 export function createAuthManager({ apiClient }) {
@@ -36,7 +54,7 @@ export function createAuthManager({ apiClient }) {
   }
 
   async function verifyApiKey(apiKey) {
-    const response = await apiClient.post("/v2/auth/verify-key", { api_key: apiKey }, { retry: false });
+    const response = await apiClient.post("/v2/auth/verify-key", { api_key: apiKey }, { retry: false, skipAuth: true });
     return normalizeVerification(response);
   }
 
@@ -52,6 +70,8 @@ export function createAuthManager({ apiClient }) {
       plan: response.plan || null,
       credits: response.credits || null,
       device: response.device || null,
+      session: response.session || null,
+      sessionToken: response.session_token || response.sessionToken || "",
       syncSecret: response.sync_secret || response.syncSecret || "",
       keyInfo: response.key_info || null
     };
@@ -59,15 +79,15 @@ export function createAuthManager({ apiClient }) {
 
   async function saveApiKey(apiKey, options = {}) {
     const clean = sanitizeApiKey(apiKey);
-    if (!clean) throw new Error("API key is required");
+    if (!clean) throw new Error("Sign in is required");
     if (!clean.startsWith("fp_") && options.allowLegacyPrefix !== true) {
-      throw new Error("EazyFill API keys must start with fp_");
+      throw new Error("This EazyFill sign-in token is not supported");
     }
 
     let verification = null;
     if (options.verify !== false) {
       verification = await verifyApiKey(clean);
-      if (!verification.valid) throw new Error("API key verification failed");
+      if (!verification.valid) throw new Error("Could not verify this EazyFill session");
     }
 
     const auth = {
@@ -78,6 +98,8 @@ export function createAuthManager({ apiClient }) {
       plan: verification?.plan || null,
       credits: verification?.credits || null,
       device: verification?.device || null,
+      session: verification?.session || null,
+      sessionToken: verification?.sessionToken || "",
       syncSecret: verification?.syncSecret || "",
       keyInfo: verification?.keyInfo || null,
       lastVerifiedAt: verification ? Date.now() : null,
@@ -89,33 +111,37 @@ export function createAuthManager({ apiClient }) {
   }
 
   async function registerAccount(payload = {}) {
-    const response = await apiClient.post("/v2/auth/register", {
-      identifier: payload.identifier || "",
-      email: payload.email || "",
-      mobile: payload.mobile || "",
+    const email = payload.email || payload.identifier || "";
+    const hasName = String(payload.name || "").trim().length > 0;
+    const endpoint = hasName ? "/v2/account/profile" : "/v2/account/start";
+    const response = await apiClient.post(endpoint, {
+      identifier: email,
+      email,
       name: payload.name || "",
       plan_code: payload.planCode || payload.plan_code || "free"
-    }, { retry: false });
+    }, { retry: false, skipAuth: true });
     return { ok: true, ...response };
   }
 
   async function verifyOtp(payload = {}) {
-    const response = await apiClient.post("/v2/auth/verify-otp", {
+    const response = await apiClient.post("/v2/account/verify", {
       challenge_id: payload.challengeId || payload.challenge_id || "",
       otp: payload.otp || "",
       device_name: payload.deviceName || payload.device_name || "EazyFill Extension"
-    }, { retry: false });
-    const apiKey = sanitizeApiKey(response.api_key);
-    if (!apiKey) throw new Error("OTP verified but no API key was returned");
+    }, { retry: false, skipAuth: true });
     const verification = normalizeVerification(response);
+    if (!verification.sessionToken) throw new Error("OTP verified but sign-in could not be completed");
+    const apiKey = sanitizeApiKey(response.api_key);
     const auth = {
       apiKey,
-      keyPrefix: keyPrefix(apiKey),
+      keyPrefix: apiKey ? keyPrefix(apiKey) : "Session",
       valid: verification.valid,
       user: verification.user,
       plan: verification.plan,
       credits: verification.credits,
       device: verification.device,
+      session: verification.session,
+      sessionToken: verification.sessionToken,
       syncSecret: verification.syncSecret,
       keyInfo: verification.keyInfo,
       lastVerifiedAt: Date.now(),
@@ -128,9 +154,9 @@ export function createAuthManager({ apiClient }) {
 
   async function refreshCachedStatus() {
     const auth = await getAuthRecord();
-    if (!auth.apiKey) return { ok: true, auth: authSnapshot(auth) };
+    if (!hasCredential(auth)) return { ok: true, auth: authSnapshot(auth) };
     try {
-      const response = await apiClient.post("/v2/auth/refresh", {}, { retry: false });
+      const response = await apiClient.post("/v2/account/refresh", {}, { retry: false });
       const verification = normalizeVerification(response);
       const nextAuth = {
         ...auth,
@@ -139,6 +165,8 @@ export function createAuthManager({ apiClient }) {
         plan: verification.plan,
         credits: verification.credits,
         device: verification.device,
+        session: verification.session || auth.session || null,
+        sessionToken: verification.sessionToken || auth.sessionToken || "",
         syncSecret: verification.syncSecret || auth.syncSecret || "",
         keyInfo: verification.keyInfo,
         lastVerifiedAt: Date.now(),
@@ -149,9 +177,14 @@ export function createAuthManager({ apiClient }) {
       return { ok: true, auth: authSnapshot(nextAuth) };
     } catch (error) {
       const invalidKey = error.status === 401 || error.status === 403 || error.data?.valid === false;
+      if (invalidKey) {
+        await removeProtectedValues(["fp_auth"]);
+        await disableAccountGatedState();
+        return { ok: false, error: error.message || String(error), auth: authSnapshot({}) };
+      }
       const nextAuth = {
         ...auth,
-        valid: invalidKey ? false : auth.valid !== false,
+        valid: auth.valid !== false,
         lastError: error.message || String(error),
         lastVerifiedAt: Date.now()
       };
@@ -161,8 +194,9 @@ export function createAuthManager({ apiClient }) {
   }
 
   async function logout() {
+    await apiClient.post("/v2/account/logout", {}, { retry: false }).catch(() => null);
     await removeProtectedValues(["fp_auth"]);
-    await chrome.storage.local.remove(["fp_credits"]);
+    await disableAccountGatedState();
     return { ok: true, auth: authSnapshot({}) };
   }
 

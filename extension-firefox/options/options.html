@@ -648,7 +648,7 @@
           <section class="surface account-setup-surface" id="account-disconnected-view">
             <div class="section-head account-section-head">
               <div>
-                <h3>Create your account</h3>
+                <h3>Sign in / Sign up</h3>
                 <p class="section-copy">Use email verification to sign in or create a new account.</p>
               </div>
             </div>
@@ -656,21 +656,21 @@
               <div class="account-column">
                 <div class="form-stack">
                   <label class="form-label">
-                    Name
-                    <input id="options-signup-name" type="text" placeholder="Your name" class="autofill-input full-width-input" autocomplete="name" required>
-                  </label>
-                  <label class="form-label">
                     Email
                     <input id="options-signup-identifier" type="email" placeholder="you@gmail.com" class="autofill-input full-width-input" autocomplete="email" required>
+                  </label>
+                  <label id="options-signup-name-row" class="form-label" hidden style="display: none;">
+                    Name
+                    <input id="options-signup-name" type="text" placeholder="Full name" class="autofill-input full-width-input" autocomplete="name">
                   </label>
                   <div class="otp-actions">
                     <button id="options-send-otp-btn" class="primary-btn otp-action-button">Continue with Email</button>
                   </div>
-                  <label class="form-label">
+                  <label id="options-signup-otp-row" class="form-label" hidden style="display: none;">
                     Verification Code
                     <input id="options-signup-otp" type="text" inputmode="numeric" placeholder="6-digit code" class="autofill-input full-width-input" disabled autocomplete="one-time-code">
                   </label>
-                  <button id="options-verify-otp-btn" class="secondary-btn otp-action-button" disabled>Verify Code</button>
+                  <button id="options-verify-otp-btn" class="secondary-btn otp-action-button" disabled hidden style="display: none;">Verify Code</button>
                   <p id="options-signup-message" class="inline-message"></p>
                 </div>
               </div>

@@ -118,6 +118,46 @@ try {
   globalThis.fetch = originalFetch;
 }
 
+const authManagerUrl = pathToFileURL(path.join(root, "extension/background/auth-manager.js"));
+const { createAuthManager } = await import(authManagerUrl);
+let logoutCalled = false;
+const authManager = createAuthManager({
+  apiClient: {
+    async post(pathname) {
+      if (pathname === "/v2/account/logout") logoutCalled = true;
+      return { ok: true };
+    }
+  }
+});
+await chrome.storage.local.set({
+  fp_settings: { syncEnabled: true, userscriptsEnabled: true },
+  fp_credits: { captcha: { remaining: 50, dailyLimit: 100 } },
+  fp_sync_meta: { lastSyncAt: Date.now() }
+});
+await send({
+  type: "SET_EXTENSION_STORAGE",
+  values: {
+    fp_auth: {
+      sessionToken: "session-secret",
+      valid: true,
+      plan: { features: { cloud_sync: true, portable_pack: true } }
+    }
+  }
+}, optionsSender);
+response = await authManager.logout();
+assert.equal(response.ok, true);
+assert.equal(logoutCalled, true);
+response = await send({
+  type: "GET_EXTENSION_STORAGE",
+  keys: ["fp_auth", "fp_settings", "fp_credits", "fp_sync_meta"]
+}, optionsSender);
+assert.equal(response.ok, true);
+assert.equal(response.data.fp_auth, undefined);
+assert.equal(response.data.fp_settings.syncEnabled, false);
+assert.equal(response.data.fp_settings.userscriptsEnabled, true);
+assert.equal(response.data.fp_credits, undefined);
+assert.equal(response.data.fp_sync_meta, undefined);
+
 response = await send({
   type: "SET_EXTENSION_STORAGE",
   values: { fp_settings: { autofillEnabled: false } }

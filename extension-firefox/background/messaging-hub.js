@@ -30,7 +30,14 @@ function ok(data = {}) {
 }
 
 function fail(error) {
-  return { ok: false, error: error?.message || String(error || "Unknown error") };
+  const detail = error?.data?.detail && typeof error.data.detail === "object" ? error.data.detail : null;
+  return {
+    ok: false,
+    error: error?.message || detail?.message || String(error || "Unknown error"),
+    code: detail?.error || error?.code || "",
+    status: error?.status || 0,
+    detail
+  };
 }
 
 function isOwnExtensionUrl(senderUrl) {
@@ -472,7 +479,7 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
       : [];
     return ok({
       status: {
-        authenticated: !!data.fp_auth?.apiKey && data.fp_auth?.valid !== false,
+        authenticated: !!String(data.fp_auth?.sessionToken || data.fp_auth?.apiKey || "").trim() && data.fp_auth?.valid !== false,
         plan: data.fp_auth?.plan || null,
         credits: data.fp_credits || null,
         settings,

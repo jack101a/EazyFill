@@ -20,7 +20,8 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   busyButtonId: null,
   authChallengeId: "",
-  authEmail: ""
+  authEmail: "",
+  authStep: "email"
 };
 
 const BUTTON_LABELS = {
@@ -234,14 +235,74 @@ function setAuthMessage(message, tone = "neutral") {
   else delete node.dataset.tone;
 }
 
+function authErrorCode(response = {}) {
+  const detail = response.detail || response.data?.detail || response.errorDetail || null;
+  if (typeof detail === "object" && detail?.error) return String(detail.error);
+  return String(response.code || response.error_code || response.errorCode || "");
+}
+
+function setDomHidden(element, hidden) {
+  if (!element) return;
+  element.hidden = !!hidden;
+  element.style.display = hidden ? "none" : "";
+}
+
+function setPopupAuthStep(step) {
+  const next = ["email", "name", "otp"].includes(step) ? step : "email";
+  state.authStep = next;
+  const panel = $("popup-auth-panel");
+  if (panel) panel.dataset.step = next;
+  const nameRow = $("popup-auth-name-row");
+  const otpRow = $("popup-auth-otp-row");
+  const sendButton = $("popup-send-otp");
+  const verifyButton = $("popup-verify-otp");
+  const emailInput = $("popup-auth-email");
+  const nameInput = $("popup-auth-name");
+  const otpInput = $("popup-auth-otp");
+
+  setDomHidden(nameRow, next !== "name");
+  setDomHidden(otpRow, next !== "otp");
+  if (sendButton) {
+    setDomHidden(sendButton, next === "otp");
+    sendButton.disabled = false;
+  }
+  if (verifyButton) {
+    setDomHidden(verifyButton, next !== "otp");
+    verifyButton.disabled = next !== "otp";
+  }
+  if (emailInput) emailInput.readOnly = next === "otp";
+  if (nameInput) nameInput.disabled = next !== "name";
+  if (otpInput) otpInput.disabled = next !== "otp";
+}
+
+function resetPopupAuthFlow({ keepEmail = true } = {}) {
+  state.authChallengeId = "";
+  state.authEmail = "";
+  const emailInput = $("popup-auth-email");
+  const nameInput = $("popup-auth-name");
+  const otpInput = $("popup-auth-otp");
+  if (!keepEmail && emailInput) emailInput.value = "";
+  if (nameInput) nameInput.value = "";
+  if (otpInput) otpInput.value = "";
+  setPopupAuthStep("email");
+  setAuthMessage("");
+}
+
 function setPopupAuthVisible(visible) {
   const panel = $("popup-auth-panel");
   if (!panel) return;
   panel.hidden = !visible;
   document.documentElement.dataset.authPanel = visible ? "open" : "closed";
+  if (visible && !state.authChallengeId) setPopupAuthStep(state.authStep || "email");
+  if (!visible) resetPopupAuthFlow();
   if (visible) {
     requestAnimationFrame(() => {
-      (state.authChallengeId ? $("popup-auth-otp") : $("popup-auth-email"))?.focus();
+      const focusTarget = state.authStep === "otp"
+        ? $("popup-auth-otp")
+        : state.authStep === "name"
+          ? $("popup-auth-name")
+          : $("popup-auth-email");
+      focusTarget?.focus();
     });
   }
 }
@@ -404,7 +465,7 @@ function renderStatus(status) {
   if ($("account-link-copy")) {
     $("account-link-copy").textContent = authenticated
       ? "Manage account and sync"
-      : "Sign in or create account";
+      : "Sign in / Sign up";
   }
 
   $("credit-progress-container").hidden = false;
@@ -487,34 +548,54 @@ async function refreshStatus() {
 
 async function sendPopupOtp() {
   const email = cleanAuthEmail($("popup-auth-email")?.value || "");
-  const name = $("popup-auth-name")?.value.trim() || "";
+  const name = state.authStep === "name" ? ($("popup-auth-name")?.value.trim() || "") : "";
   const validationMessage = authEmailValidationMessage(email);
   if (validationMessage) {
     setAuthMessage(validationMessage, "error");
     $("popup-auth-email")?.focus();
     return;
   }
+  if (state.authStep === "name" && !name) {
+    setAuthMessage("Enter your name to create the account.", "error");
+    $("popup-auth-name")?.focus();
+    return;
+  }
 
   const button = $("popup-send-otp");
   if (button) setLoading(button, true, "Sending");
-  setAuthMessage("Sending verification code...");
+  setAuthMessage(state.authStep === "name" ? "Creating account..." : "Checking email...");
   const response = await sendMessage({
     type: "REGISTER_ACCOUNT",
     payload: { identifier: email, name, planCode: "free" }
   });
   if (button) setLoading(button, false);
   if (!response.ok) {
+    if (authErrorCode(response) === "name_required" || /name/i.test(response.error || "")) {
+      setPopupAuthStep("name");
+      setAuthMessage("Enter your name to create the account.", "neutral");
+      $("popup-auth-name")?.focus();
+      return;
+    }
     const message = response.error || "Could not send verification code.";
     setAuthMessage(message, "error");
-    if (/name/i.test(message)) $("popup-auth-name")?.focus();
+    return;
+  }
+  if (response.next_step === "profile" || response.nextStep === "profile" || response.profile_required) {
+    state.authEmail = email;
+    setPopupAuthStep("name");
+    setAuthMessage("Enter your name to create the account.", "neutral");
+    $("popup-auth-name")?.focus();
     return;
   }
 
   state.authChallengeId = response.challenge_id || response.challengeId || response.challenge?.id || "";
+  if (!state.authChallengeId) {
+    setAuthMessage("Could not start verification. Try again.", "error");
+    return;
+  }
   state.authEmail = email;
   if ($("popup-auth-email")) $("popup-auth-email").value = email;
-  if ($("popup-auth-otp")) $("popup-auth-otp").disabled = false;
-  if ($("popup-verify-otp")) $("popup-verify-otp").disabled = false;
+  setPopupAuthStep("otp");
   const devOtp = response.dev_otp ? ` Code: ${response.dev_otp}` : "";
   setAuthMessage(`Code sent. Check your email.${devOtp}`, "success");
   $("popup-auth-otp")?.focus();
@@ -550,7 +631,7 @@ async function verifyPopupOtp() {
     $("popup-auth-otp").value = "";
     $("popup-auth-otp").disabled = true;
   }
-  if ($("popup-verify-otp")) $("popup-verify-otp").disabled = true;
+  setPopupAuthStep("email");
   setAuthMessage("Signed in. Sync and billing are ready.", "success");
   await refreshStatus();
   setTimeout(() => setPopupAuthVisible(false), 700);
@@ -907,10 +988,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("popup-auth-email")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") sendPopupOtp();
   });
+  $("popup-auth-name")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") sendPopupOtp();
+  });
   $("popup-auth-otp")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") verifyPopupOtp();
   });
 
+  setPopupAuthStep("email");
   await refreshStatus();
   await restoreCaptchaRouteDraft();
 });

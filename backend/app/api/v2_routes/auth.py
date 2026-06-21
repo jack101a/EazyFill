@@ -16,7 +16,7 @@ from sqlalchemy import or_
 from app.api.v2_routes.deps import credits_payload, ensure_user_sync_secret, key_info_payload, plan_payload, user_payload, validate_v2_key
 from app.core.config import DEFAULT_OTP_ALLOWED_EMAIL_DOMAINS, DEFAULT_OTP_BLOCKED_EMAIL_DOMAINS
 from app.core.db import get_session
-from app.core.models import SubscriptionPlan, User, UserSubscription
+from app.core.models import AuthChallenge, SubscriptionPlan, User, UserSession, UserSubscription
 from app.services.email_service import EmailDeliveryError
 
 router = APIRouter(prefix="/auth", tags=["v2-auth"])
@@ -26,7 +26,6 @@ OTP_TTL_SECONDS = 10 * 60
 OTP_REGISTER_WINDOW_SECONDS = 5 * 60
 OTP_REGISTER_MAX_PER_IDENTIFIER = 3
 OTP_REGISTER_MAX_PER_CLIENT = 12
-_OTP_CHALLENGES: dict[str, dict[str, Any]] = {}
 _OTP_REGISTER_EVENTS: dict[str, list[float]] = {}
 
 SUPPORTED_EMAIL_MESSAGE = (
@@ -101,11 +100,21 @@ def _otp_hash(otp: str) -> str:
     return hashlib.sha256(str(otp).encode("utf-8")).hexdigest()
 
 
-def _purge_expired_challenges() -> None:
-    now = time.time()
-    for challenge_id, challenge in list(_OTP_CHALLENGES.items()):
-        if float(challenge.get("expires_at", 0)) <= now:
-            _OTP_CHALLENGES.pop(challenge_id, None)
+def _session_hash(token: str) -> str:
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _purge_expired_challenges(session) -> None:
+    now = _utcnow_naive()
+    (
+        session.query(AuthChallenge)
+        .filter(AuthChallenge.status == "pending", AuthChallenge.expires_at <= now)
+        .update({"status": "expired", "updated_at": now}, synchronize_session=False)
+    )
 
 
 def _client_key(request: Request) -> str:
@@ -174,13 +183,88 @@ async def _consume_otp_register_quota(request: Request, identifier_type: str, id
     _consume_otp_register_quota_memory(request, identifier_type, identifier)
 
 
-def _drop_existing_identifier_challenges(identifier_type: str, identifier: str) -> None:
-    for challenge_id, challenge in list(_OTP_CHALLENGES.items()):
-        if (
-            str(challenge.get("identifier_type") or "") == identifier_type
-            and str(challenge.get("identifier") or "") == identifier
-        ):
-            _OTP_CHALLENGES.pop(challenge_id, None)
+def _client_ip(request: Request) -> str:
+    return _client_key(request).removeprefix("ip:")[:45]
+
+
+def _drop_existing_identifier_challenges(session, identifier_type: str, identifier: str) -> None:
+    now = _utcnow_naive()
+    (
+        session.query(AuthChallenge)
+        .filter(
+            AuthChallenge.identifier_type == identifier_type,
+            AuthChallenge.identifier == identifier,
+            AuthChallenge.status == "pending",
+        )
+        .update({"status": "replaced", "updated_at": now}, synchronize_session=False)
+    )
+
+
+def _create_auth_challenge(
+    session,
+    request: Request,
+    *,
+    identifier_type: str,
+    identifier: str,
+    name: str,
+    plan_code: str,
+    otp: str,
+    account_mode: str,
+) -> AuthChallenge:
+    now = _utcnow_naive()
+    challenge = AuthChallenge(
+        challenge_id=secrets.token_urlsafe(24),
+        identifier_type=identifier_type,
+        identifier=identifier,
+        account_mode=account_mode,
+        name=name.strip(),
+        plan_code=(plan_code or "free").strip().lower(),
+        otp_hash=_otp_hash(otp),
+        status="pending",
+        attempts=0,
+        expires_at=now + timedelta(seconds=OTP_TTL_SECONDS),
+        client_ip=_client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:512],
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(challenge)
+    session.flush()
+    return challenge
+
+
+def _load_pending_challenge(session, challenge_id: str) -> AuthChallenge | None:
+    return (
+        session.query(AuthChallenge)
+        .filter(AuthChallenge.challenge_id == challenge_id, AuthChallenge.status == "pending")
+        .first()
+    )
+
+
+def _challenge_payload(challenge: AuthChallenge) -> dict[str, Any]:
+    return {
+        "identifier_type": challenge.identifier_type,
+        "identifier": challenge.identifier,
+        "name": challenge.name,
+        "plan_code": challenge.plan_code,
+    }
+
+
+def _mark_challenge_status(challenge_id: str, status: str) -> None:
+    session = get_session()
+    try:
+        now = _utcnow_naive()
+        (
+            session.query(AuthChallenge)
+            .filter(AuthChallenge.challenge_id == challenge_id)
+            .update({"status": status, "updated_at": now}, synchronize_session=False)
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def _dev_otp_enabled(settings: Any) -> bool:
@@ -234,14 +318,6 @@ def _user_for_identifier(session, identifier_type: str, identifier: str) -> User
         User.notes.like(f"%{eazyfill_token}%"),
         User.notes.like(f"%{flowpilot_token}%"),
     )).first()
-
-
-def _identifier_belongs_to_existing_user(identifier_type: str, identifier: str) -> bool:
-    session = get_session()
-    try:
-        return _user_for_identifier(session, identifier_type, identifier) is not None
-    finally:
-        session.close()
 
 
 def _create_or_update_user(session, challenge: dict[str, Any]) -> User:
@@ -316,7 +392,74 @@ def _ensure_subscription(session, user: User, plan_code: str) -> UserSubscriptio
     return sub
 
 
-def _auth_response(ctx, request: Request, *, api_key: str | None = None) -> dict:
+def _issue_user_session(
+    request: Request,
+    *,
+    user_id: int,
+    api_key_id: int | None,
+    device_id: str,
+    device_name: str,
+) -> tuple[str, dict[str, Any]]:
+    token = f"efs_{secrets.token_urlsafe(32)}"
+    now = _utcnow_naive()
+    expires_at = now + timedelta(days=90)
+    session = get_session()
+    try:
+        (
+            session.query(UserSession)
+            .filter(
+                UserSession.user_id == user_id,
+                UserSession.device_id == device_id,
+                UserSession.status == "active",
+            )
+            .update(
+                {
+                    "status": "replaced",
+                    "revoked_at": now,
+                    "revoke_reason": "new_login",
+                },
+                synchronize_session=False,
+            )
+        )
+        record = UserSession(
+            user_id=user_id,
+            api_key_id=api_key_id,
+            session_hash=_session_hash(token),
+            device_id=device_id,
+            device_name=device_name[:255],
+            user_agent=request.headers.get("user-agent", "")[:512],
+            ip_address=_client_ip(request),
+            status="active",
+            issued_at=now,
+            expires_at=expires_at,
+            last_seen_at=now,
+        )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        return token, {
+            "id": record.id,
+            "device_id": record.device_id,
+            "status": record.status,
+            "issued_at": record.issued_at.isoformat() if record.issued_at else None,
+            "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+            "last_seen_at": record.last_seen_at.isoformat() if record.last_seen_at else None,
+        }
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def _auth_response(
+    ctx,
+    request: Request,
+    *,
+    api_key: str | None = None,
+    session_token: str | None = None,
+    session_info: dict[str, Any] | None = None,
+) -> dict:
     body = {
         "valid": True,
         "user_id": ctx.user_id,
@@ -332,6 +475,10 @@ def _auth_response(ctx, request: Request, *, api_key: str | None = None) -> dict
     }
     if api_key:
         body["api_key"] = api_key
+    if session_token:
+        body["session_token"] = session_token
+    if session_info:
+        body["session"] = session_info
     return body
 
 
@@ -346,14 +493,6 @@ async def register(request: Request, payload: RegisterRequest) -> dict:
 
     settings = getattr(request.app.state.container, "settings", None)
     _validate_supported_email(settings, identifier)
-    existing_account = False
-    if not payload.name.strip():
-        existing_account = _identifier_belongs_to_existing_user(identifier_type, identifier)
-    if not payload.name.strip() and not existing_account:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "name_required", "message": "Name is required for new accounts"},
-        )
     email_service = getattr(request.app.state.container, "email_service", None)
     email_enabled = bool(getattr(email_service, "enabled", False))
     dev_otp_enabled = _dev_otp_enabled(settings)
@@ -364,19 +503,39 @@ async def register(request: Request, payload: RegisterRequest) -> dict:
         )
 
     await _consume_otp_register_quota(request, identifier_type, identifier)
-    _purge_expired_challenges()
-    _drop_existing_identifier_challenges(identifier_type, identifier)
     otp = f"{secrets.randbelow(1000000):06d}"
-    challenge_id = secrets.token_urlsafe(24)
-    _OTP_CHALLENGES[challenge_id] = {
-        "identifier_type": identifier_type,
-        "identifier": identifier,
-        "name": payload.name.strip(),
-        "plan_code": (payload.plan_code or "free").strip().lower(),
-        "otp_hash": _otp_hash(otp),
-        "expires_at": time.time() + OTP_TTL_SECONDS,
-        "attempts": 0,
-    }
+    session = get_session()
+    try:
+        _purge_expired_challenges(session)
+        existing_account = _user_for_identifier(session, identifier_type, identifier) is not None
+        if not payload.name.strip() and not existing_account:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "name_required", "message": "Name is required for new accounts"},
+            )
+        _drop_existing_identifier_challenges(session, identifier_type, identifier)
+        challenge = _create_auth_challenge(
+            session,
+            request,
+            identifier_type=identifier_type,
+            identifier=identifier,
+            name=payload.name.strip(),
+            plan_code=payload.plan_code,
+            otp=otp,
+            account_mode="login" if existing_account else "signup",
+        )
+        session.commit()
+        challenge_id = str(challenge.challenge_id)
+        account_mode = str(challenge.account_mode)
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
     if email_enabled:
         try:
             await email_service.send_otp_email(
@@ -385,7 +544,7 @@ async def register(request: Request, payload: RegisterRequest) -> dict:
                 ttl_seconds=OTP_TTL_SECONDS,
             )
         except EmailDeliveryError as exc:
-            _OTP_CHALLENGES.pop(challenge_id, None)
+            _mark_challenge_status(challenge_id, "email_failed")
             raise HTTPException(
                 status_code=502,
                 detail={"error": "otp_email_failed", "message": "Could not send OTP email. Try again shortly."},
@@ -396,7 +555,7 @@ async def register(request: Request, payload: RegisterRequest) -> dict:
         "challenge_id": challenge_id,
         "delivery": "email",
         "expires_in_seconds": OTP_TTL_SECONDS,
-        "account_mode": "login" if existing_account else "signup",
+        "account_mode": account_mode,
     }
     if dev_otp_enabled:
         response["dev_otp"] = otp
@@ -410,21 +569,35 @@ async def verify_otp(
     x_eazyfill_device_id: str = Header(default="", alias="X-EazyFill-Device-Id"),
     x_flowpilot_device_id: str = Header(default="", alias="X-FlowPilot-Device-Id"),
 ) -> dict:
-    _purge_expired_challenges()
-    challenge = _OTP_CHALLENGES.get(payload.challenge_id)
-    if not challenge:
-        raise HTTPException(status_code=400, detail={"error": "otp_expired", "message": "OTP challenge expired"})
-    challenge["attempts"] = int(challenge.get("attempts") or 0) + 1
-    if challenge["attempts"] > 5:
-        _OTP_CHALLENGES.pop(payload.challenge_id, None)
-        raise HTTPException(status_code=429, detail={"error": "otp_attempts_exceeded", "message": "Too many OTP attempts"})
-    if not secrets.compare_digest(str(challenge["otp_hash"]), _otp_hash(payload.otp)):
-        raise HTTPException(status_code=400, detail={"error": "invalid_otp", "message": "OTP is invalid"})
-
     session = get_session()
     try:
-        user = _create_or_update_user(session, challenge)
-        _ensure_subscription(session, user, str(challenge.get("plan_code") or "free"))
+        _purge_expired_challenges(session)
+        challenge = _load_pending_challenge(session, payload.challenge_id)
+        now = _utcnow_naive()
+        if not challenge:
+            raise HTTPException(status_code=400, detail={"error": "otp_expired", "message": "OTP challenge expired"})
+        if challenge.expires_at <= now:
+            challenge.status = "expired"
+            challenge.updated_at = now
+            session.commit()
+            raise HTTPException(status_code=400, detail={"error": "otp_expired", "message": "OTP challenge expired"})
+
+        challenge.attempts = int(challenge.attempts or 0) + 1
+        challenge.updated_at = now
+        if challenge.attempts > 5:
+            challenge.status = "failed"
+            session.commit()
+            raise HTTPException(status_code=429, detail={"error": "otp_attempts_exceeded", "message": "Too many OTP attempts"})
+
+        if not secrets.compare_digest(str(challenge.otp_hash), _otp_hash(payload.otp)):
+            session.commit()
+            raise HTTPException(status_code=400, detail={"error": "invalid_otp", "message": "OTP is invalid"})
+
+        user = _create_or_update_user(session, _challenge_payload(challenge))
+        _ensure_subscription(session, user, str(challenge.plan_code or "free"))
+        challenge.status = "consumed"
+        challenge.consumed_at = now
+        challenge.updated_at = now
         session.commit()
         user_id = int(user.id)
     except Exception:
@@ -447,13 +620,19 @@ async def verify_otp(
         device_name=payload.device_name,
         user_agent=request.headers.get("user-agent", ""),
     )
-    _OTP_CHALLENGES.pop(payload.challenge_id, None)
+    session_token, session_info = _issue_user_session(
+        request,
+        user_id=user_id,
+        api_key_id=int(key.id),
+        device_id=device_id,
+        device_name=payload.device_name or "EazyFill Extension",
+    )
     ctx = await validate_v2_key(
         request,
         x_api_key=plain_key,
         x_eazyfill_device_id=device_id,
     )
-    return _auth_response(ctx, request, api_key=plain_key)
+    return _auth_response(ctx, request, api_key=plain_key, session_token=session_token, session_info=session_info)
 
 
 @router.post("/verify-key")

@@ -75,6 +75,26 @@ class User(Base):
         }
 
 
+class UserIdentity(Base):
+    __tablename__ = "user_identities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    identity_type = Column(String(32), nullable=False, default="email")
+    identifier = Column(String(255), nullable=False, index=True)
+    provider = Column(String(64), nullable=False, default="email")
+    is_primary = Column(Boolean, nullable=False, default=True)
+    verified_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("identity_type", "identifier", name="uq_user_identity_identifier"),
+    )
+
+    user = relationship("User")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SUBSCRIPTION PLANS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -314,6 +334,47 @@ class UserApiKeyDevice(Base):
 
     # Relationships
     api_key = relationship("UserApiKey", back_populates="devices")
+
+
+class AuthChallenge(Base):
+    __tablename__ = "auth_challenges"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    challenge_id = Column(String(128), unique=True, nullable=False, index=True)
+    identifier_type = Column(String(32), nullable=False, default="email")
+    identifier = Column(String(255), nullable=False, index=True)
+    account_mode = Column(String(32), nullable=False, default="signup")
+    name = Column(String(255), nullable=False, default="")
+    plan_code = Column(String(64), nullable=False, default="free")
+    otp_hash = Column(String(128), nullable=False)
+    status = Column(String(32), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+    client_ip = Column(String(45), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    api_key_id = Column(Integer, ForeignKey("user_api_keys.id"), nullable=True, index=True)
+    session_hash = Column(String(128), unique=True, nullable=False)
+    device_id = Column(String(255), nullable=False, index=True)
+    device_name = Column(String(255), default="")
+    user_agent = Column(String(512), default="")
+    ip_address = Column(String(45), nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    issued_at = Column(DateTime, nullable=False, default=_utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=False, default=_utcnow)
+    revoked_at = Column(DateTime, nullable=True)
+    revoke_reason = Column(String(255), default="")
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

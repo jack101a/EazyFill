@@ -279,6 +279,10 @@ function currentPlanCode() {
   return String(state.auth.plan?.code || state.auth.plan_code || "").toLowerCase();
 }
 
+function isAuthenticated(auth = state.auth) {
+  return !!String(auth.sessionToken || auth.apiKey || "").trim() && auth.valid !== false;
+}
+
 function availablePaymentProvider(code) {
   return state.paymentProviders.find((provider) => (
     String(provider.code || "").toLowerCase() === code && provider.available !== false
@@ -324,7 +328,7 @@ function planAllowsPortablePack(action, plan = state.auth.plan) {
 }
 
 function requirePortablePackAccess(action) {
-  const authenticated = !!state.auth.apiKey && state.auth.valid !== false;
+  const authenticated = isAuthenticated();
   if (!authenticated) throw new Error("Connect EazyFill before using import/export");
   if (!planAllowsPortablePack(action)) {
     throw new Error("Import/export is not enabled for this plan");
@@ -622,7 +626,7 @@ async function toggleTheme() {
 
 function renderStatus() {
   const credits = normalizeCredits(state.credits);
-  const authenticated = !!state.auth.apiKey && state.auth.valid !== false;
+  const authenticated = isAuthenticated();
   const syncAvailable = authenticated && planAllowsSync(state.auth.plan);
   const syncEnabled = syncAvailable && !!state.settings.syncEnabled;
   const packExportAvailable = authenticated && planAllowsPortablePack("export");
@@ -641,7 +645,7 @@ function renderStatus() {
   setText("account-plan", state.auth.plan?.name || state.auth.plan?.code || "--");
   setText("account-device", state.auth.device?.status || "Current browser");
   setText("account-expires", formatDate(state.auth.keyInfo?.expires_at));
-  setText("account-summary-status", authenticated ? "Connected" : "Sign in");
+  setText("account-summary-status", authenticated ? "Connected" : "Sign in / Sign up");
   setText("account-summary-plan", state.auth.plan?.name || state.auth.plan?.code || "Free Tier");
   setText("account-summary-credits", `${credits.remaining || 0} / ${credits.limit || 0}`);
 
@@ -714,7 +718,7 @@ function renderSettings() {
   setChecked("setting-sync", !!state.settings.syncEnabled);
   const syncToggle = $("setting-sync");
   if (syncToggle) {
-    const authenticated = !!state.auth.apiKey && state.auth.valid !== false;
+    const authenticated = isAuthenticated();
     syncToggle.disabled = !authenticated || !planAllowsSync(state.auth.plan);
   }
   setValue("setting-api-base", state.settings.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl);
@@ -2481,7 +2485,7 @@ function focusAccountSignup() {
 function renderBilling() {
   const plansGrid = $("plans-grid");
   const creditsGrid = $("credits-grid");
-  const authenticated = !!state.auth.apiKey && state.auth.valid !== false;
+  const authenticated = isAuthenticated();
   if (plansGrid) plansGrid.replaceChildren();
   if (creditsGrid) creditsGrid.replaceChildren();
 
@@ -3668,7 +3672,7 @@ async function loadBillingData() {
 }
 
 async function createBillingOrder(plan) {
-  if (!state.auth.apiKey || state.auth.valid === false) {
+  if (!isAuthenticated()) {
     focusAccountSignup();
     throw new Error("Sign in before choosing a plan.");
   }
@@ -4033,15 +4037,64 @@ function bind() {
   // Account login and registration bindings
   $("options-send-otp-btn")?.addEventListener("click", () => handle(optionsSendOtp));
   $("options-verify-otp-btn")?.addEventListener("click", () => handle(optionsVerifyOtp));
+  $("options-signup-identifier")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") handle(optionsSendOtp);
+  });
+  $("options-signup-name")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") handle(optionsSendOtp);
+  });
+  $("options-signup-otp")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") handle(optionsVerifyOtp);
+  });
+  setOptionsAuthStep("email");
 
   // Command palette initialization
   initCommandPalette();
 }
 
 let otpChallengeId = "";
+let optionsAuthStep = "email";
+
+function optionsAuthErrorCode(response = {}) {
+  const detail = response.detail || response.data?.detail || response.errorDetail || null;
+  if (typeof detail === "object" && detail?.error) return String(detail.error);
+  return String(response.code || response.error_code || response.errorCode || "");
+}
+
+function setDomHidden(element, hidden) {
+  if (!element) return;
+  element.hidden = !!hidden;
+  element.style.display = hidden ? "none" : "";
+}
+
+function setOptionsAuthStep(step) {
+  const next = ["email", "name", "otp"].includes(step) ? step : "email";
+  optionsAuthStep = next;
+  const nameRow = $("options-signup-name-row");
+  const otpRow = $("options-signup-otp-row");
+  const sendButton = $("options-send-otp-btn");
+  const verifyButton = $("options-verify-otp-btn");
+  const emailInput = $("options-signup-identifier");
+  const nameInput = $("options-signup-name");
+  const otpInput = $("options-signup-otp");
+
+  setDomHidden(nameRow, next !== "name");
+  setDomHidden(otpRow, next !== "otp");
+  if (sendButton) {
+    setDomHidden(sendButton, next === "otp");
+    sendButton.disabled = false;
+  }
+  if (verifyButton) {
+    setDomHidden(verifyButton, next !== "otp");
+    verifyButton.disabled = next !== "otp";
+  }
+  if (emailInput) emailInput.readOnly = next === "otp";
+  if (nameInput) nameInput.disabled = next !== "name";
+  if (otpInput) otpInput.disabled = next !== "otp";
+}
 
 async function optionsSendOtp() {
-  const name = $("options-signup-name")?.value.trim() || "";
+  const name = optionsAuthStep === "name" ? ($("options-signup-name")?.value.trim() || "") : "";
   const identifier = $("options-signup-identifier")?.value.trim() || "";
   const messageNode = $("options-signup-message");
   if (!identifier) {
@@ -4054,25 +4107,42 @@ async function optionsSendOtp() {
     $("options-signup-identifier")?.focus();
     return;
   }
+  if (optionsAuthStep === "name" && !name) {
+    setInlineMessage(messageNode, "Enter your name to create the account.", "error");
+    $("options-signup-name")?.focus();
+    return;
+  }
   const button = $("options-send-otp-btn");
   if (button) button.disabled = true;
-  setInlineMessage(messageNode, "Sending verification code...", "neutral");
+  setInlineMessage(messageNode, optionsAuthStep === "name" ? "Creating account..." : "Checking email...", "neutral");
   const response = await sendMessage({
     type: "REGISTER_ACCOUNT",
     payload: { identifier, name, planCode: "free" }
   });
   if (button) button.disabled = false;
   if (!response.ok) {
+    if (optionsAuthErrorCode(response) === "name_required" || /name/i.test(response.error || "")) {
+      setOptionsAuthStep("name");
+      setInlineMessage(messageNode, "Enter your name to create the account.", "neutral");
+      $("options-signup-name")?.focus();
+      return;
+    }
     const message = response.error || "Could not send OTP.";
     setInlineMessage(messageNode, message, "error");
-    if (/name/i.test(message)) $("options-signup-name")?.focus();
+    return;
+  }
+  if (response.next_step === "profile" || response.nextStep === "profile" || response.profile_required) {
+    setOptionsAuthStep("name");
+    setInlineMessage(messageNode, "Enter your name to create the account.", "neutral");
+    $("options-signup-name")?.focus();
     return;
   }
   otpChallengeId = response.challenge_id || response.challengeId || response.challenge?.id || "";
-  const otpInput = $("options-signup-otp");
-  const verifyBtn = $("options-verify-otp-btn");
-  if (otpInput) otpInput.disabled = false;
-  if (verifyBtn) verifyBtn.disabled = false;
+  if (!otpChallengeId) {
+    setInlineMessage(messageNode, "Could not start verification. Try again.", "error");
+    return;
+  }
+  setOptionsAuthStep("otp");
   const devOtp = response.dev_otp ? ` Code: ${response.dev_otp}` : "";
   setInlineMessage(messageNode, `Code sent. Check your email.${devOtp}`, "success");
   toast("Verification code sent", "success");
@@ -4107,7 +4177,7 @@ async function optionsVerifyOtp() {
     otpInput.value = "";
     otpInput.disabled = true;
   }
-  if (button) button.disabled = true;
+  setOptionsAuthStep("email");
   setInlineMessage(messageNode, "Account verified and connected!", "success");
   toast("Account verified and connected!", "success");
   await loadState();

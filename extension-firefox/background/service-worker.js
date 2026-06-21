@@ -40,7 +40,7 @@ async function autoSyncEligible() {
   const data = await getExtensionStorage(["fp_auth", "fp_settings"]);
   const auth = data.fp_auth || {};
   const settings = data.fp_settings || {};
-  return !!auth.apiKey
+  return !!String(auth.sessionToken || auth.apiKey || "").trim()
     && auth.valid !== false
     && settings.syncEnabled === true
     && planAllowsSync(auth.plan);

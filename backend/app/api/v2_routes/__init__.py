@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v2_routes import auth, billing, captcha, credits, devices, keys, plans, sync, webhooks
+from app.api.v2_routes import account, auth, billing, captcha, credits, devices, keys, plans, sync, webhooks
 
 router = APIRouter(prefix="/v2", tags=["v2"])
 
+router.include_router(account.router)
 router.include_router(auth.router)
 router.include_router(plans.router)
 router.include_router(credits.router)

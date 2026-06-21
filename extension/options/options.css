@@ -23,6 +23,10 @@
   --sidebar-width: 248px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html[data-theme="light"] {
   color-scheme: light;
   --glass-bg: rgba(255, 255, 255, 0.58);

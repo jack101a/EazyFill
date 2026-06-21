@@ -12,9 +12,9 @@ async function getDeviceId() {
 }
 
 function requireAuth(auth) {
-  const apiKey = String(auth?.apiKey || "").trim();
-  if (!apiKey) throw new Error("Connect EazyFill before syncing");
-  return apiKey;
+  const authSecret = String(auth?.sessionToken || auth?.apiKey || "").trim();
+  if (!authSecret) throw new Error("Connect EazyFill before syncing");
+  return authSecret;
 }
 
 function requireSyncSecret(auth) {
