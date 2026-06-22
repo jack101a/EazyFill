@@ -250,15 +250,27 @@ class UsageCycleService:
         """Return recent usage cycles for dashboard history views."""
         session = self._session()
         try:
+            requested_limit = max(1, min(int(limit or 12), 50))
             rows = (
                 session.query(UsageCycle)
                 .filter(UsageCycle.user_id == int(user_id))
-                .order_by(UsageCycle.cycle_start_at.desc())
-                .limit(max(1, min(int(limit or 12), 50)))
+                .order_by(UsageCycle.cycle_start_at.desc(), UsageCycle.id.desc())
+                .limit(requested_limit * 5)
                 .all()
             )
             items = []
+            seen_cycles = set()
             for cycle in rows:
+                if cycle.cycle_start_at and cycle.cycle_end_at:
+                    cycle_key = (
+                        int(cycle.subscription_id or 0),
+                        cycle.cycle_start_at,
+                        cycle.cycle_end_at,
+                        int(cycle.monthly_limit or 0),
+                    )
+                    if cycle_key in seen_cycles:
+                        continue
+                    seen_cycles.add(cycle_key)
                 used = int(cycle.used_count or 0)
                 quota = int(cycle.monthly_limit or 0)
                 remaining = max(0, quota - used)
@@ -273,6 +285,8 @@ class UsageCycleService:
                     "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
                     "updated_at": cycle.updated_at.isoformat() if cycle.updated_at else None,
                 })
+                if len(items) >= requested_limit:
+                    break
             return items
         finally:
             session.close()

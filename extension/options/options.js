@@ -300,6 +300,24 @@ function billingProviderLabel(code) {
   return provider?.name || (code === "razorpay" ? "Razorpay" : code);
 }
 
+function openExternalBillingUrl(url) {
+  const target = String(url || "").trim();
+  if (!target) return false;
+  try {
+    if (globalThis.chrome?.tabs?.create) {
+      chrome.tabs.create({ url: target });
+      return true;
+    }
+  } catch (_) {
+    // Fall through to window.open for browsers that do not expose tabs here.
+  }
+  try {
+    return Boolean(window.open(target, "_blank", "noopener,noreferrer"));
+  } catch (_) {
+    return false;
+  }
+}
+
 function planAllowsSync(plan) {
   if (!plan || typeof plan !== "object") return false;
   if (plan.features && Object.prototype.hasOwnProperty.call(plan.features, "cloud_sync")) {
@@ -3695,7 +3713,14 @@ async function createBillingOrder(plan) {
   if (!response.ok) throw new Error(response.error || "Order creation failed");
   if (provider === "razorpay") {
     const orderId = response.order?.id || response.payment?.provider_order_id || "";
-    toast(orderId ? `Razorpay order created: ${orderId}` : "Razorpay order created", "success");
+    const checkoutUrl = response.checkout_url || response.checkoutUrl || response.order?.checkout_url || "";
+    if (checkoutUrl && openExternalBillingUrl(checkoutUrl)) {
+      toast("Razorpay checkout opened", "success");
+    } else if (checkoutUrl) {
+      toast("Order created. Allow popups to open Razorpay checkout.", "warning");
+    } else {
+      toast(orderId ? `Razorpay order created: ${orderId}` : "Razorpay order created", "success");
+    }
   }
   await loadBillingData();
 }

@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from urllib.parse import parse_qs, urlparse
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -48,7 +49,10 @@ def _app(Session):
     app.state.container = SimpleNamespace(
         settings=settings,
         audit_service=SimpleNamespace(log=MagicMock()),
-        payment_service=SimpleNamespace(activate_payment=MagicMock(return_value={"payment": {"id": 1}})),
+        payment_service=SimpleNamespace(
+            activate_payment=MagicMock(return_value={"payment": {"id": 1}}),
+            record_provider_payment=MagicMock(return_value=None),
+        ),
     )
     app.include_router(webhooks.router)
     app.include_router(admin_payments.router, prefix="/admin")
@@ -125,6 +129,7 @@ def test_admin_can_create_razorpay_order_with_session_guard(monkeypatch):
     assert data["ok"] is True
     assert data["key_id"] == "rzp_test_key"
     assert data["order"]["id"] == "order_test_123"
+    assert data["checkout_url"].startswith("http://testserver/api/payments/razorpay/checkout?token=")
     session = Session()
     try:
         payment = session.query(PaymentRecord).one()
@@ -133,6 +138,63 @@ def test_admin_can_create_razorpay_order_with_session_guard(monkeypatch):
         assert payment.status == "created"
     finally:
         session.close()
+
+
+def test_razorpay_checkout_page_and_verify_activate_payment(monkeypatch):
+    Session = _session_factory()
+    user_id, plan_id = _seed_user_plan(Session)
+    app = _app(Session)
+    monkeypatch.setattr(webhooks, "get_session", Session)
+    monkeypatch.setattr(webhooks.httpx, "AsyncClient", _FakeAsyncClient)
+    client = TestClient(app)
+
+    order_response = client.post(
+        "/api/payments/razorpay/order",
+        json={"user_id": user_id, "plan_id": plan_id},
+        headers={"x-payment-init-token": "order-token"},
+    )
+    assert order_response.status_code == 200
+    order_data = order_response.json()
+    checkout_url = order_data["checkout_url"]
+    token = parse_qs(urlparse(checkout_url).query)["token"][0]
+
+    checkout_response = client.get(urlparse(checkout_url).path + "?" + urlparse(checkout_url).query)
+    assert checkout_response.status_code == 200
+    assert "https://checkout.razorpay.com/v1/checkout.js" in checkout_response.text
+    assert "order_test_123" in checkout_response.text
+
+    provider_payment_id = "pay_test_123"
+    signature = hmac.new(
+        b"rzp_test_secret",
+        f"order_test_123|{provider_payment_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    verify_response = client.post(
+        "/api/payments/razorpay/checkout/verify",
+        json={
+            "token": token,
+            "provider_order_id": "order_test_123",
+            "provider_payment_id": provider_payment_id,
+            "provider_signature": signature,
+        },
+    )
+
+    assert verify_response.status_code == 200
+    assert verify_response.json()["ok"] is True
+    payment_id = int(order_data["payment"]["id"])
+    app.state.container.payment_service.record_provider_payment.assert_called_once_with(
+        payment_id,
+        provider="razorpay",
+        provider_order_id="order_test_123",
+        provider_payment_id=provider_payment_id,
+        provider_signature=signature,
+        provider_status="captured",
+    )
+    app.state.container.payment_service.activate_payment.assert_called_once_with(
+        payment_id,
+        triggered_by="razorpay_checkout",
+    )
 
 
 def test_admin_payment_manual_approval_requires_confirmation_and_reason(monkeypatch):
