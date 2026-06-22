@@ -795,6 +795,20 @@ def test_v2_plans_returns_catalog():
     assert body["payment_providers"][0]["key_id"] == "rzp_test_key"
 
 
+def test_v2_plans_repairs_empty_checkout_catalog():
+    app = _app()
+    plan = app.state.container.subscription_service.get_plan_by_code.return_value
+    app.state.container.subscription_service.list_plans.side_effect = [[], [plan]]
+
+    response = TestClient(app).get("/v2/plans")
+
+    assert response.status_code == 200
+    assert response.json()["plans"][0]["code"] == "basic"
+    app.state.container.subscription_service.ensure_default_checkout_plans.assert_called_once_with(
+        only_when_empty=True,
+    )
+
+
 def test_v2_billing_create_order_uses_plan_price(monkeypatch):
     from app.api.v2_routes import billing as billing_route
     from fastapi.responses import JSONResponse
@@ -822,6 +836,37 @@ def test_v2_billing_create_order_uses_plan_price(monkeypatch):
     assert body["ok"] is True
     assert body["order"]["amount"] == 14900
     app.state.container.payment_service.create_payment.assert_not_called()
+
+
+def test_v2_billing_create_order_repairs_missing_default_plan(monkeypatch):
+    from app.api.v2_routes import billing as billing_route
+    from fastapi.responses import JSONResponse
+
+    async def fake_create_razorpay_order_for_user(_request, *, user_id, plan_id):
+        return JSONResponse({
+            "ok": True,
+            "provider": "razorpay",
+            "user_id": user_id,
+            "plan_id": plan_id,
+            "order": {"id": "order_123", "amount": 14900},
+        })
+
+    monkeypatch.setattr(billing_route, "create_razorpay_order_for_user", fake_create_razorpay_order_for_user)
+    app = _app()
+    plan = app.state.container.subscription_service.get_plan_by_code.return_value
+    app.state.container.subscription_service.get_plan_by_code.side_effect = [None, plan]
+
+    response = TestClient(app).post(
+        "/v2/billing/create-order",
+        headers={"X-Api-Key": "fp_test"},
+        json={"plan_code": "basic"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    app.state.container.subscription_service.ensure_default_checkout_plans.assert_called_once_with(
+        codes={"basic"},
+    )
 
 
 def test_v2_billing_create_razorpay_order_delegates_to_provider(monkeypatch):

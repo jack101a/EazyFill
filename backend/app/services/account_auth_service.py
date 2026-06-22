@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 
 from app.core.config import DEFAULT_OTP_ALLOWED_EMAIL_DOMAINS, DEFAULT_OTP_BLOCKED_EMAIL_DOMAINS
 from app.core.db import get_session
@@ -103,6 +103,18 @@ def _otp_hash(otp: str) -> str:
 
 def _session_hash(token: str) -> str:
     return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def _apply_logout_statement_timeout(session, milliseconds: int = 2500) -> None:
+    try:
+        bind = session.get_bind()
+        if bind.dialect.name == "postgresql":
+            session.execute(text(f"SET LOCAL statement_timeout = '{int(milliseconds)}ms'"))
+    except Exception as exc:
+        logger.debug(
+            "account_logout_statement_timeout_not_applied",
+            extra={"context": {"error_type": type(exc).__name__}},
+        )
 
 
 def _client_key(request: Request) -> str:
@@ -655,6 +667,7 @@ class AccountAuthService:
         session = get_session()
         try:
             now = _utcnow()
+            _apply_logout_statement_timeout(session)
             updated = (
                 session.query(UserSession)
                 .filter(UserSession.session_hash == _session_hash(clean), UserSession.status == "active")
@@ -670,8 +683,12 @@ class AccountAuthService:
             )
             session.commit()
             return bool(updated)
-        except Exception:
+        except Exception as exc:
             session.rollback()
-            raise
+            logger.warning(
+                "account_logout_revoke_db_failed",
+                extra={"context": {"error_type": type(exc).__name__}},
+            )
+            return False
         finally:
             session.close()

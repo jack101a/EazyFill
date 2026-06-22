@@ -45,7 +45,11 @@ def _plan_by_payload(request: Request, payload: CreateOrderRequest) -> Any:
     if payload.plan_id is not None:
         plan = service.get_plan(int(payload.plan_id))
     elif payload.plan_code:
-        plan = service.get_plan_by_code(str(payload.plan_code).strip())
+        plan_code = str(payload.plan_code).strip().lower()
+        plan = service.get_plan_by_code(plan_code)
+        if (not plan or not getattr(plan, "is_active", True)) and hasattr(service, "ensure_default_checkout_plans"):
+            service.ensure_default_checkout_plans(codes={plan_code})
+            plan = service.get_plan_by_code(plan_code)
     else:
         raise HTTPException(status_code=400, detail={"error": "plan_required"})
     if not plan or not getattr(plan, "is_active", True):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -10,6 +11,97 @@ from app.core.models import PaymentRecord, SubscriptionPlan, UsageCycle, UserSub
 from app.services.promo_plan_policy import (
     check_promo_plan_eligibility,
     validate_promo_audience,
+)
+
+
+DEFAULT_CHECKOUT_PLAN_SPECS: tuple[dict, ...] = (
+    {
+        "code": "free",
+        "name": "Free",
+        "description": "Starter access for trying EazyFill.",
+        "monthly_limit": 100,
+        "duration_days": 30,
+        "price_amount": 0,
+        "currency": "INR",
+        "max_devices": 1,
+        "allowed_services": {
+            "captcha": True,
+            "autofill": True,
+            "userscripts": True,
+            "sync": False,
+            "portable_pack": False,
+            "local_backup_export": False,
+            "local_backup_import": False,
+            "rules_limit": 25,
+            "scripts_limit": 5,
+            "script_storage_mb": 5,
+            "captcha_credit_cost": 1,
+        },
+        "rate_limit_rpm": 30,
+        "rate_limit_burst": 5,
+        "show_in_checkout": False,
+        "is_promo": False,
+        "promo_audience": "both",
+    },
+    {
+        "code": "basic",
+        "name": "Basic",
+        "description": "Core EazyFill automation, sync, and import/export.",
+        "monthly_limit": 500,
+        "duration_days": 30,
+        "price_amount": 14900,
+        "currency": "INR",
+        "max_devices": 2,
+        "allowed_services": {
+            "captcha": True,
+            "autofill": True,
+            "userscripts": True,
+            "sync": True,
+            "portable_pack": True,
+            "local_backup_export": True,
+            "local_backup_import": True,
+            "rules_limit": 100,
+            "scripts_limit": 25,
+            "script_storage_mb": 25,
+            "captcha_credit_cost": 1,
+        },
+        "rate_limit_rpm": 60,
+        "rate_limit_burst": 10,
+        "show_in_checkout": True,
+        "is_promo": False,
+        "promo_audience": "both",
+    },
+    {
+        "code": "pro",
+        "name": "Pro",
+        "description": "Higher credits, more devices, and priority CAPTCHA solving.",
+        "monthly_limit": 2500,
+        "duration_days": 30,
+        "price_amount": 49900,
+        "currency": "INR",
+        "max_devices": 5,
+        "allowed_services": {
+            "captcha": True,
+            "autofill": True,
+            "userscripts": True,
+            "sync": True,
+            "portable_pack": True,
+            "local_backup_export": True,
+            "local_backup_import": True,
+            "unlimited_rules": True,
+            "js_rules": True,
+            "priority_solving": True,
+            "rules_limit": None,
+            "scripts_limit": 100,
+            "script_storage_mb": 100,
+            "captcha_credit_cost": 1,
+        },
+        "rate_limit_rpm": 120,
+        "rate_limit_burst": 20,
+        "show_in_checkout": True,
+        "is_promo": False,
+        "promo_audience": "both",
+    },
 )
 
 
@@ -23,6 +115,62 @@ class SubscriptionService:
         return self._session_factory()
 
     # ── Plans ──────────────────────────────────────────────────────────────
+
+    def ensure_default_checkout_plans(
+        self,
+        codes: set[str] | None = None,
+        *,
+        only_when_empty: bool = False,
+    ) -> list[SubscriptionPlan]:
+        """Create or repair the built-in checkout catalog when deployment data is empty."""
+        wanted_codes = {str(code or "").strip().lower() for code in (codes or set()) if str(code or "").strip()}
+        specs = [
+            spec for spec in DEFAULT_CHECKOUT_PLAN_SPECS
+            if not wanted_codes or str(spec["code"]) in wanted_codes
+        ]
+        if not specs:
+            return []
+
+        session = self._session()
+        try:
+            if only_when_empty:
+                visible_plan = (
+                    session.query(SubscriptionPlan.id)
+                    .filter(
+                        SubscriptionPlan.is_active == True,  # noqa: E712
+                        SubscriptionPlan.show_in_checkout == True,  # noqa: E712
+                    )
+                    .first()
+                )
+                if visible_plan:
+                    return []
+
+            touched: list[SubscriptionPlan] = []
+            for spec in specs:
+                plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.code == spec["code"]).first()
+                values = {**spec, "allowed_services": deepcopy(spec.get("allowed_services") or {})}
+                if plan:
+                    if only_when_empty or wanted_codes:
+                        for key, value in values.items():
+                            if hasattr(plan, key):
+                                setattr(plan, key, value)
+                        plan.is_active = True
+                        plan.updated_at = datetime.now(timezone.utc)
+                        touched.append(plan)
+                    continue
+                plan = SubscriptionPlan(**values)
+                session.add(plan)
+                touched.append(plan)
+
+            session.commit()
+            for plan in touched:
+                session.refresh(plan)
+            return touched
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def create_plan(
         self,

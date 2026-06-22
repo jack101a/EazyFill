@@ -80,8 +80,13 @@ def payment_providers_payload(request: Request) -> list[dict[str, Any]]:
 
 @router.get("")
 async def list_plans(request: Request) -> dict:
-    plans = request.app.state.container.subscription_service.list_plans(active_only=True)
+    subscription_service = request.app.state.container.subscription_service
+    plans = subscription_service.list_plans(active_only=True)
     plans = [plan for plan in plans if getattr(plan, "show_in_checkout", True)]
+    if not plans and hasattr(subscription_service, "ensure_default_checkout_plans"):
+        subscription_service.ensure_default_checkout_plans(only_when_empty=True)
+        plans = subscription_service.list_plans(active_only=True)
+        plans = [plan for plan in plans if getattr(plan, "show_in_checkout", True)]
     credit_service = getattr(request.app.state.container, "credit_service", None)
     return {
         "plans": [plan_to_payload(plan, credit_service=credit_service) for plan in plans],

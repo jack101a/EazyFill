@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -109,6 +110,66 @@ def test_account_email_first_signup_profile_then_verify(monkeypatch):
 
     session = Session()
     assert session.query(UserSession).filter(UserSession.status == "active").count() == 1
+
+
+def test_account_logout_revokes_session(monkeypatch):
+    app, Session = _app(monkeypatch)
+    client = TestClient(app)
+    headers = {"X-EazyFill-Device-Id": "device-logout"}
+
+    start = client.post("/v2/account/start", json={"email": "logoutuser@gmail.com"}, headers=headers)
+    assert start.json()["next_step"] == "profile"
+    profile = client.post(
+        "/v2/account/profile",
+        json={"email": "logoutuser@gmail.com", "name": "Logout User"},
+        headers=headers,
+    )
+    verify = client.post(
+        "/v2/account/verify",
+        json={"challenge_id": profile.json()["challenge_id"], "otp": profile.json()["dev_otp"]},
+        headers=headers,
+    )
+    assert verify.status_code == 200
+
+    logout = client.post(
+        "/v2/account/logout",
+        headers={**headers, "X-EazyFill-Session": verify.json()["session_token"]},
+        json={},
+    )
+
+    assert logout.status_code == 200
+    assert logout.json()["ok"] is True
+    assert logout.json()["revoked"] is True
+    session = Session()
+    try:
+        assert session.query(UserSession).filter(UserSession.status == "active").count() == 0
+        assert session.query(UserSession).filter(UserSession.status == "revoked").count() == 1
+    finally:
+        session.close()
+
+
+def test_account_logout_returns_when_revoke_is_slow(monkeypatch):
+    from app.api.v2_routes import account as account_route
+
+    app, _Session = _app(monkeypatch)
+
+    def slow_logout(_token):
+        time.sleep(0.05)
+        return True
+
+    monkeypatch.setattr(account_route.account_auth_service, "logout", slow_logout)
+    monkeypatch.setattr(account_route, "LOGOUT_TIMEOUT_SECONDS", 0.01)
+    started = time.perf_counter()
+
+    response = TestClient(app).post(
+        "/v2/account/logout",
+        headers={"X-EazyFill-Session": "efs_slow"},
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "revoked": False}
+    assert time.perf_counter() - started < 0.5
 
 
 def test_account_existing_email_start_sends_otp(monkeypatch):

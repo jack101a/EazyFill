@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Header, Request
@@ -12,6 +14,8 @@ from app.services.account_auth_service import AccountAuthService
 
 router = APIRouter(prefix="/account", tags=["v2-account"])
 account_auth_service = AccountAuthService()
+logger = logging.getLogger(__name__)
+LOGOUT_TIMEOUT_SECONDS = 3.0
 
 
 class AccountStartRequest(BaseModel):
@@ -139,5 +143,18 @@ async def logout(
     auth_header = request.headers.get("authorization", "").strip()
     if not token and auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1].strip()
-    account_auth_service.logout(token)
-    return {"ok": True}
+    revoked = False
+    if token:
+        try:
+            revoked = await asyncio.wait_for(
+                asyncio.to_thread(account_auth_service.logout, token),
+                timeout=LOGOUT_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("account_logout_revoke_timed_out")
+        except Exception as exc:
+            logger.warning(
+                "account_logout_revoke_failed",
+                extra={"context": {"error_type": type(exc).__name__}},
+            )
+    return {"ok": True, "revoked": bool(revoked)}
