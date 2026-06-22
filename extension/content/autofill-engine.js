@@ -13,6 +13,20 @@
     waitTimeoutMs: 3000
   };
 
+  function runtimeRuleLimit(runtime = {}) {
+    if (runtime.features && runtime.features.autofill === false) return 0;
+    const raw = runtime.limits ? runtime.limits.rules : undefined;
+    if (raw === undefined || raw === null || raw === "") return Infinity;
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : Infinity;
+  }
+
+  function applyRuleRuntimeLimit(rules, runtime = {}) {
+    const limit = runtimeRuleLimit(runtime);
+    if (!Number.isFinite(limit)) return rules;
+    return rules.slice(0, limit);
+  }
+
   let running = false;
   let pageKey = "";
   const stepCursors = new Map();
@@ -578,6 +592,11 @@
     return response.data || {};
   }
 
+  async function loadRuntimeLimits() {
+    const response = await sendMessage({ type: "GET_RUNTIME_PLAN_LIMITS" });
+    return response.ok ? response : { limits: { rules: null }, features: { autofill: true } };
+  }
+
   async function executeMatchingRules(options = {}) {
     if (running) return { ok: false, error: "Autofill is already running" };
     if (window.EazyFillExcludedHosts?.isExcludedHost()) return { ok: false, error: "This site is excluded" };
@@ -595,8 +614,17 @@
         .filter(ruleMatches)
         .filter((rule) => options.ruleId ? true : ruleMatchesActiveProfile(rule, settings))
         .sort((a, b) => (b.priority || 100) - (a.priority || 100));
-      const selected = options.ruleId ? matching.filter((rule) => String(rule.id) === String(options.ruleId)) : matching;
-      if (!selected.length) return { ok: true, matchedRules: 0, executedRules: 0, results: [] };
+      const planAllowed = applyRuleRuntimeLimit(matching, await loadRuntimeLimits());
+      const selected = options.ruleId ? planAllowed.filter((rule) => String(rule.id) === String(options.ruleId)) : planAllowed;
+      if (!selected.length) {
+        return {
+          ok: true,
+          matchedRules: matching.length,
+          executedRules: 0,
+          planLimitedRules: Math.max(0, matching.length - planAllowed.length),
+          results: []
+        };
+      }
 
       const results = [];
       const rulesToRun = isStepMode(options.mode) ? selected.slice(0, 1) : selected;
@@ -607,6 +635,7 @@
         ok: true,
         matchedRules: matching.length,
         executedRules: results.length,
+        planLimitedRules: Math.max(0, matching.length - planAllowed.length),
         succeededSteps: results.reduce((sum, item) => sum + item.succeeded, 0),
         failedSteps: results.reduce((sum, item) => sum + item.failed, 0),
         skippedSteps: results.reduce((sum, item) => sum + item.skipped, 0),

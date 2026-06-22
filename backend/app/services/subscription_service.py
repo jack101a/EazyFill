@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from app.core.models import PaymentRecord, SubscriptionPlan, UsageCycle, UserSubscription, User
 from app.services.promo_plan_policy import (
@@ -14,105 +14,43 @@ from app.services.promo_plan_policy import (
 )
 
 
-DEFAULT_CHECKOUT_PLAN_SPECS: tuple[dict, ...] = (
-    {
-        "code": "free",
-        "name": "Free",
-        "description": "Starter access for trying EazyFill.",
-        "monthly_limit": 100,
-        "duration_days": 30,
-        "price_amount": 0,
-        "currency": "INR",
-        "max_devices": 1,
-        "allowed_services": {
-            "captcha": True,
-            "autofill": True,
-            "userscripts": True,
-            "sync": False,
-            "portable_pack": False,
-            "local_backup_export": False,
-            "local_backup_import": False,
-            "rules_limit": 25,
-            "scripts_limit": 5,
-            "script_storage_mb": 5,
-            "captcha_credit_cost": 1,
-        },
-        "rate_limit_rpm": 30,
-        "rate_limit_burst": 5,
-        "show_in_checkout": False,
-        "is_promo": False,
-        "promo_audience": "both",
-    },
-    {
-        "code": "basic",
-        "name": "Basic",
-        "description": "Core EazyFill automation, sync, and import/export.",
-        "monthly_limit": 500,
-        "duration_days": 30,
-        "price_amount": 14900,
-        "currency": "INR",
-        "max_devices": 2,
-        "allowed_services": {
-            "captcha": True,
-            "autofill": True,
-            "userscripts": True,
-            "sync": True,
-            "portable_pack": True,
-            "local_backup_export": True,
-            "local_backup_import": True,
-            "rules_limit": 100,
-            "scripts_limit": 25,
-            "script_storage_mb": 25,
-            "captcha_credit_cost": 1,
-        },
-        "rate_limit_rpm": 60,
-        "rate_limit_burst": 10,
-        "show_in_checkout": True,
-        "is_promo": False,
-        "promo_audience": "both",
-    },
-    {
-        "code": "pro",
-        "name": "Pro",
-        "description": "Higher credits, more devices, and priority CAPTCHA solving.",
-        "monthly_limit": 2500,
-        "duration_days": 30,
-        "price_amount": 49900,
-        "currency": "INR",
-        "max_devices": 5,
-        "allowed_services": {
-            "captcha": True,
-            "autofill": True,
-            "userscripts": True,
-            "sync": True,
-            "portable_pack": True,
-            "local_backup_export": True,
-            "local_backup_import": True,
-            "unlimited_rules": True,
-            "js_rules": True,
-            "priority_solving": True,
-            "rules_limit": None,
-            "scripts_limit": 100,
-            "script_storage_mb": 100,
-            "captcha_credit_cost": 1,
-        },
-        "rate_limit_rpm": 120,
-        "rate_limit_burst": 20,
-        "show_in_checkout": True,
-        "is_promo": False,
-        "promo_audience": "both",
-    },
-)
-
-
 class SubscriptionService:
     """Manages subscription plans and user subscription lifecycle."""
 
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, settings=None):
         self._session_factory = session_factory
+        self._settings = settings
 
     def _session(self) -> Session:
         return self._session_factory()
+
+    def _bootstrap_plan_specs(self) -> list[dict]:
+        plans_config = getattr(self._settings, "plans", None)
+        raw = getattr(plans_config, "bootstrap_plans", None) if plans_config else None
+        return [dict(item) for item in (raw or []) if isinstance(item, dict)]
+
+    def _auto_seed_on_empty(self) -> bool:
+        plans_config = getattr(self._settings, "plans", None)
+        return bool(getattr(plans_config, "auto_seed_on_empty", False))
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
+    def _as_naive_utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    @classmethod
+    def _subscription_is_current(cls, sub: UserSubscription | None, now: datetime | None = None) -> bool:
+        if not sub or sub.status != "active":
+            return False
+        end_at = cls._as_naive_utc(sub.end_at)
+        return end_at is None or end_at >= (now or cls._now())
 
     # ── Plans ──────────────────────────────────────────────────────────────
 
@@ -122,11 +60,14 @@ class SubscriptionService:
         *,
         only_when_empty: bool = False,
     ) -> list[SubscriptionPlan]:
-        """Create or repair the built-in checkout catalog when deployment data is empty."""
+        """Create or repair configured bootstrap plans when deployment data is empty."""
+        if only_when_empty and not self._auto_seed_on_empty():
+            return []
+
         wanted_codes = {str(code or "").strip().lower() for code in (codes or set()) if str(code or "").strip()}
         specs = [
-            spec for spec in DEFAULT_CHECKOUT_PLAN_SPECS
-            if not wanted_codes or str(spec["code"]) in wanted_codes
+            spec for spec in self._bootstrap_plan_specs()
+            if str(spec.get("code") or "").strip() and (not wanted_codes or str(spec.get("code")).lower() in wanted_codes)
         ]
         if not specs:
             return []
@@ -147,8 +88,24 @@ class SubscriptionService:
 
             touched: list[SubscriptionPlan] = []
             for spec in specs:
-                plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.code == spec["code"]).first()
-                values = {**spec, "allowed_services": deepcopy(spec.get("allowed_services") or {})}
+                code = str(spec.get("code") or "").strip().lower()
+                plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.code == code).first()
+                values = {
+                    "code": code,
+                    "name": str(spec.get("name") or code.title()),
+                    "description": str(spec.get("description") or ""),
+                    "monthly_limit": int(spec.get("monthly_limit") or 0),
+                    "duration_days": int(spec.get("duration_days") or 30),
+                    "price_amount": int(spec.get("price_amount") or 0),
+                    "currency": str(spec.get("currency") or "INR").upper()[:3],
+                    "max_devices": int(spec.get("max_devices") or 1),
+                    "allowed_services": dict(spec.get("allowed_services") or {}),
+                    "rate_limit_rpm": int(spec.get("rate_limit_rpm") or 60),
+                    "rate_limit_burst": int(spec.get("rate_limit_burst") or 10),
+                    "show_in_checkout": bool(spec.get("show_in_checkout", True)),
+                    "is_promo": bool(spec.get("is_promo", False)),
+                    "promo_audience": validate_promo_audience(spec.get("promo_audience", "both")),
+                }
                 if plan:
                     if only_when_empty or wanted_codes:
                         for key, value in values.items():
@@ -401,15 +358,107 @@ class SubscriptionService:
     def get_active_subscription(self, user_id: int) -> UserSubscription | None:
         session = self._session()
         try:
+            now = self._now()
+            (
+                session.query(UserSubscription)
+                .filter(
+                    UserSubscription.user_id == user_id,
+                    UserSubscription.status == "active",
+                    UserSubscription.end_at.isnot(None),
+                    UserSubscription.end_at < now,
+                )
+                .update({"status": "expired", "updated_at": now}, synchronize_session=False)
+            )
+            session.commit()
             return (
                 session.query(UserSubscription)
                 .filter(
                     UserSubscription.user_id == user_id,
                     UserSubscription.status == "active",
+                    or_(UserSubscription.end_at.is_(None), UserSubscription.end_at >= now),
                 )
                 .order_by(UserSubscription.created_at.desc())
                 .first()
             )
+        finally:
+            session.close()
+
+    def get_free_plan(self, session: Session) -> SubscriptionPlan | None:
+        plan = (
+            session.query(SubscriptionPlan)
+            .filter(
+                SubscriptionPlan.code == "free",
+                SubscriptionPlan.is_active == True,  # noqa: E712
+            )
+            .first()
+        )
+        if plan:
+            return plan
+        return (
+            session.query(SubscriptionPlan)
+            .filter(
+                SubscriptionPlan.is_active == True,  # noqa: E712
+                SubscriptionPlan.price_amount <= 0,
+            )
+            .order_by(SubscriptionPlan.monthly_limit.asc(), SubscriptionPlan.id.asc())
+            .first()
+        )
+
+    def ensure_current_or_free_subscription(self, user_id: int) -> tuple[UserSubscription | None, SubscriptionPlan | None]:
+        """Return a current subscription, downgrading expired paid access to the free plan if available."""
+        session = self._session()
+        try:
+            now = self._now()
+            active_subs = (
+                session.query(UserSubscription)
+                .filter(UserSubscription.user_id == int(user_id), UserSubscription.status == "active")
+                .order_by(UserSubscription.created_at.desc())
+                .all()
+            )
+            current = None
+            for sub in active_subs:
+                if self._subscription_is_current(sub, now):
+                    if current is None:
+                        current = sub
+                    continue
+                sub.status = "expired"
+                sub.updated_at = now
+
+            if current is None:
+                free_plan = self.get_free_plan(session)
+                if free_plan:
+                    current = UserSubscription(
+                        user_id=int(user_id),
+                        plan_id=int(free_plan.id),
+                        status="active",
+                        monthly_limit_snapshot=int(free_plan.monthly_limit or 0),
+                        start_at=now,
+                        end_at=now + timedelta(days=int(free_plan.duration_days or 30)),
+                        billing_anchor_day=now.day,
+                        current_cycle_start_at=now,
+                        current_cycle_end_at=now + timedelta(days=int(free_plan.duration_days or 30)),
+                        approved_at=now,
+                    )
+                    session.add(current)
+                    session.flush()
+
+            plan = (
+                session.query(SubscriptionPlan).filter(SubscriptionPlan.id == current.plan_id).first()
+                if current else None
+            )
+            session.commit()
+            if current:
+                session.refresh(current)
+            if plan:
+                session.refresh(plan)
+            if current:
+                session.expunge(current)
+            if plan:
+                session.expunge(plan)
+            return current, plan
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 

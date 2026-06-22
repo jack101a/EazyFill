@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.core.models import UsageCycle, UserSubscription, User
@@ -14,6 +14,14 @@ from app.core.models import UsageCycle, UserSubscription, User
 def _utcnow_db() -> datetime:
     """Naive UTC datetime for DB comparisons; SQLite drops timezone info."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class UsageCycleService:
@@ -43,7 +51,15 @@ class UsageCycleService:
                 .first()
             )
             if cycle:
-                return cycle
+                sub = (
+                    session.query(UserSubscription)
+                    .filter(UserSubscription.id == int(cycle.subscription_id or 0))
+                    .first()
+                )
+                end_at = _as_naive_utc(sub.end_at) if sub else None
+                if sub and sub.status == "active" and (end_at is None or end_at >= now):
+                    return cycle
+                return None
 
             # No active cycle — try to create from active subscription
             sub = (
@@ -51,7 +67,9 @@ class UsageCycleService:
                 .filter(
                     UserSubscription.user_id == user_id,
                     UserSubscription.status == "active",
+                    or_(UserSubscription.end_at.is_(None), UserSubscription.end_at >= now),
                 )
+                .order_by(UserSubscription.created_at.desc())
                 .first()
             )
             if not sub:

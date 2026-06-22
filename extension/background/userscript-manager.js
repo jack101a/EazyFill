@@ -172,6 +172,38 @@ function userscriptsAllowed(settings = {}) {
   return settings.extensionEnabled !== false && settings.userscriptsEnabled !== false;
 }
 
+function planFeature(plan, key, fallback = true) {
+  if (!plan || typeof plan !== "object") return fallback;
+  if (plan.features && Object.prototype.hasOwnProperty.call(plan.features, key)) return plan.features[key];
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, key)) return plan.allowed_services[key];
+  return fallback;
+}
+
+function planLimit(plan, key) {
+  if (!plan || typeof plan !== "object") return undefined;
+  const limits = plan.limits && typeof plan.limits === "object" ? plan.limits : {};
+  if (Object.prototype.hasOwnProperty.call(limits, key)) return limits[key];
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, `${key}_limit`)) {
+    return plan.allowed_services[`${key}_limit`];
+  }
+  return undefined;
+}
+
+function allowedScriptLimit(auth = {}) {
+  const plan = auth.plan || {};
+  if (planFeature(plan, "userscripts", true) !== true) return 0;
+  const raw = planLimit(plan, "scripts");
+  if (raw === undefined || raw === null || raw === "") return Infinity;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : Infinity;
+}
+
+function applyScriptPlanLimit(scripts, auth = {}) {
+  const limit = allowedScriptLimit(auth);
+  if (!Number.isFinite(limit)) return scripts;
+  return scripts.slice(0, limit);
+}
+
 async function loadBootstrapCapabilities(scripts) {
   const ids = new Set(scripts.map((script) => String(script.id)));
   let stored = {};
@@ -523,14 +555,15 @@ export async function registerStoredUserscripts() {
   }
 
   const [data, userscriptsEnabled] = await Promise.all([
-    getProtectedValues(["fp_scripts", "fp_settings"]),
+    getProtectedValues(["fp_auth", "fp_scripts", "fp_settings"]),
     getUserscriptsEnabled()
   ]);
   const scripts = Array.isArray(data.fp_scripts) ? data.fp_scripts : [];
   const activeProfile = activeProfileId(data.fp_settings || {});
-  const enabledScripts = userscriptsEnabled
+  const candidateScripts = userscriptsEnabled
     ? scripts.filter((script) => script && script.enabled !== false && script.rawCode && scriptMatchesProfile(script, activeProfile))
     : [];
+  const enabledScripts = applyScriptPlanLimit(candidateScripts, data.fp_auth || {});
 
   if (chrome.userScripts.getScripts && chrome.userScripts.unregister) {
     const registered = await chrome.userScripts.getScripts();

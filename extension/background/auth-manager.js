@@ -32,6 +32,27 @@ function authSnapshot(auth = {}) {
   };
 }
 
+function planAllowsSync(plan) {
+  if (!plan || typeof plan !== "object") return false;
+  if (plan.features && Object.prototype.hasOwnProperty.call(plan.features, "cloud_sync")) {
+    return plan.features.cloud_sync === true;
+  }
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, "sync")) {
+    return plan.allowed_services.sync === true;
+  }
+  return false;
+}
+
+async function applyPlanGatedSettings(plan) {
+  const data = await getExtensionStorage(["fp_settings"]).catch(() => ({}));
+  await setExtensionStorage({
+    fp_settings: {
+      ...(data.fp_settings || {}),
+      syncEnabled: planAllowsSync(plan)
+    }
+  });
+}
+
 async function disableAccountGatedState() {
   const data = await getExtensionStorage(["fp_settings"]).catch(() => ({}));
   await setExtensionStorage({
@@ -106,6 +127,7 @@ export function createAuthManager({ apiClient }) {
       lastError: ""
     };
     await setExtensionStorage({ fp_auth: auth });
+    await applyPlanGatedSettings(auth.plan);
     if (verification?.credits) await setExtensionStorage({ fp_credits: verification.credits });
     return { ok: true, auth: authSnapshot(auth) };
   }
@@ -148,6 +170,7 @@ export function createAuthManager({ apiClient }) {
       lastError: ""
     };
     await setExtensionStorage({ fp_auth: auth });
+    await applyPlanGatedSettings(auth.plan);
     if (verification.credits) await setExtensionStorage({ fp_credits: verification.credits });
     return { ok: true, auth: authSnapshot(auth) };
   }
@@ -173,6 +196,7 @@ export function createAuthManager({ apiClient }) {
         lastError: ""
       };
       await setExtensionStorage({ fp_auth: nextAuth });
+      await applyPlanGatedSettings(nextAuth.plan);
       if (verification.credits) await setExtensionStorage({ fp_credits: verification.credits });
       return { ok: true, auth: authSnapshot(nextAuth) };
     } catch (error) {

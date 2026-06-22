@@ -119,6 +119,10 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "otp_allowed_email_domains": DEFAULT_OTP_ALLOWED_EMAIL_DOMAINS,
         "otp_blocked_email_domains": DEFAULT_OTP_BLOCKED_EMAIL_DOMAINS,
     },
+    "plans": {
+        "auto_seed_on_empty": False,
+        "bootstrap_plans": [],
+    },
 }
 
 
@@ -214,6 +218,11 @@ class EmailConfig(BaseModel):
     otp_blocked_email_domains: list[str] = Field(default_factory=lambda: list(DEFAULT_OTP_BLOCKED_EMAIL_DOMAINS))
 
 
+class PlansConfig(BaseModel):
+    auto_seed_on_empty: bool = False
+    bootstrap_plans: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class Settings(BaseModel):
     app_name: str = "eazyfill"
     app_mode: str = "normal"
@@ -228,6 +237,7 @@ class Settings(BaseModel):
     retrain: RetrainConfig = Field(default_factory=RetrainConfig)
     payment: PaymentConfig = Field(default_factory=PaymentConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
+    plans: PlansConfig = Field(default_factory=PlansConfig)
 
     @field_validator("app_mode")
     @classmethod
@@ -374,6 +384,19 @@ def get_settings() -> Settings:
         "OTP_BLOCKED_EMAIL_DOMAINS",
         config_dict["email"].get("otp_blocked_email_domains", DEFAULT_OTP_BLOCKED_EMAIL_DOMAINS),
     )
+
+    config_dict.setdefault("plans", {})
+    config_dict["plans"]["auto_seed_on_empty"] = os.getenv(
+        "PLAN_AUTO_SEED_ON_EMPTY",
+        str(config_dict["plans"].get("auto_seed_on_empty", False)),
+    ).lower() in {"1", "true", "yes", "on"}
+    bootstrap_plans_raw = (
+        os.getenv("PLAN_BOOTSTRAP_JSON", "").strip()
+        or os.getenv("EAZYFILL_PLAN_BOOTSTRAP_JSON", "").strip()
+    )
+    if bootstrap_plans_raw:
+        import json
+        config_dict["plans"]["bootstrap_plans"] = json.loads(bootstrap_plans_raw)
 
     config_dict.setdefault("server", {})
     config_dict["server"]["debug"] = os.getenv("DEBUG", str(config_dict["server"].get("debug", False))).lower() in {"1", "true", "yes"}

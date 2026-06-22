@@ -10,7 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.v2_routes import router
 from app.core.db import Base
-from app.core.models import SubscriptionPlan, UserSession
+from app.core.models import SubscriptionPlan, User, UserSession
+from app.services.subscription_service import SubscriptionService
 
 
 def _session_factory():
@@ -54,6 +55,7 @@ def _app(monkeypatch):
             email=SimpleNamespace(otp_dev_otp_enabled=True),
         ),
         email_service=SimpleNamespace(enabled=False),
+        subscription_service=SubscriptionService(Session),
         credit_service=SimpleNamespace(
             get_balance=MagicMock(return_value={
                 "captcha": {"used_today": 0, "daily_limit": 100, "remaining": 100},
@@ -196,3 +198,41 @@ def test_account_existing_email_start_sends_otp(monkeypatch):
     assert second.json()["next_step"] == "verify"
     assert second.json()["account_mode"] == "login"
     assert second.json()["dev_otp"]
+
+
+def test_account_existing_email_profile_does_not_create_duplicate_user(monkeypatch):
+    app, Session = _app(monkeypatch)
+    client = TestClient(app)
+    headers = {"X-EazyFill-Device-Id": "device-existing"}
+
+    profile = client.post(
+        "/v2/account/profile",
+        json={"email": "sameuser@gmail.com", "name": "Same User"},
+        headers=headers,
+    )
+    verify = client.post(
+        "/v2/account/verify",
+        json={"challenge_id": profile.json()["challenge_id"], "otp": profile.json()["dev_otp"]},
+        headers=headers,
+    )
+    assert verify.status_code == 200
+
+    login_profile = client.post(
+        "/v2/account/profile",
+        json={"email": "sameuser@gmail.com", "name": "Updated Name"},
+        headers=headers,
+    )
+    assert login_profile.status_code == 200
+    assert login_profile.json()["account_mode"] == "login"
+    login_verify = client.post(
+        "/v2/account/verify",
+        json={"challenge_id": login_profile.json()["challenge_id"], "otp": login_profile.json()["dev_otp"]},
+        headers=headers,
+    )
+    assert login_verify.status_code == 200
+
+    session = Session()
+    try:
+        assert session.query(User).filter(User.email == "sameuser@gmail.com").count() == 1
+    finally:
+        session.close()

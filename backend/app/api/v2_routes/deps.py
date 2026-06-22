@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Header, HTTPException, Request
+from sqlalchemy import or_
 
 from app.core.db import get_session
 from app.core.models import SubscriptionPlan, User, UserSession, UserSubscription
@@ -62,22 +63,38 @@ def _device_id(request: Request, explicit: str | None = None) -> str:
     return f"ua:{ua[:180]}" if ua else "ua:unknown"
 
 
-def _load_user_context(record: dict[str, Any], api_key: str, device_id: str, *, key_kind: str = "user") -> V2AuthContext:
+def _load_user_context(
+    record: dict[str, Any],
+    api_key: str,
+    device_id: str,
+    *,
+    key_kind: str = "user",
+    container: Any | None = None,
+) -> V2AuthContext:
     user_id = int(record.get("user_id") or 0)
     session = get_session()
     try:
         user = session.query(User).filter(User.id == user_id).first()
         ensure_user_sync_secret(user)
-        sub = (
-            session.query(UserSubscription)
-            .filter(UserSubscription.user_id == user_id, UserSubscription.status == "active")
-            .order_by(UserSubscription.created_at.desc())
-            .first()
-        )
-        plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first() if sub else None
         session.flush()
         session.expunge_all()
         session.commit()
+        subscription_service = getattr(container, "subscription_service", None)
+        if subscription_service is not None and user_id:
+            sub, plan = subscription_service.ensure_current_or_free_subscription(user_id)
+        else:
+            now = _utcnow()
+            sub = (
+                session.query(UserSubscription)
+                .filter(
+                    UserSubscription.user_id == user_id,
+                    UserSubscription.status == "active",
+                    or_(UserSubscription.end_at.is_(None), UserSubscription.end_at >= now),
+                )
+                .order_by(UserSubscription.created_at.desc())
+                .first()
+            )
+            plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first() if sub else None
         return V2AuthContext(
             api_key=api_key,
             device_id=device_id,
@@ -142,7 +159,7 @@ async def validate_v2_key(
                 "name": "EazyFill Session",
                 "expires_at": record.expires_at.isoformat() if record.expires_at else None,
             }
-            return _load_user_context(session_record, "", device_id, key_kind="session")
+            return _load_user_context(session_record, "", device_id, key_kind="session", container=container)
         finally:
             session.close()
 
@@ -164,7 +181,7 @@ async def validate_v2_key(
                 )
                 if bound is None:
                     raise _auth_error(401, "device_mismatch", "This browser is not authorized for the account")
-            return _load_user_context(record, api_key, device_id)
+            return _load_user_context(record, api_key, device_id, container=container)
 
     legacy_record = container.key_service.validate_key(api_key)
     if not legacy_record:
@@ -193,10 +210,33 @@ def plan_payload(ctx: V2AuthContext) -> dict[str, Any]:
         if "portable_pack" in entitlements
         else entitlements.get("sync", False)
     )
+    rules_limit = entitlements.get("rules_limit")
+    scripts_limit = entitlements.get("scripts_limit")
+    script_storage_mb = entitlements.get("script_storage_mb")
+    has_plan = plan is not None
+    no_plan_features = {
+        "cloud_sync": False,
+        "portable_pack": False,
+        "local_backup_export": False,
+        "local_backup_import": False,
+        "unlimited_rules": False,
+        "js_rules": False,
+        "priority_solving": False,
+        "captcha": False,
+        "autofill": False,
+        "userscripts": False,
+    }
     return {
-        "code": plan.code if plan else "legacy",
-        "name": plan.name if plan else "Legacy Plan",
-        "captcha_daily_limit": int(plan.monthly_limit if plan else 3000),
+        "code": plan.code if plan else ("legacy" if not ctx.user_id else "none"),
+        "name": plan.name if plan else ("Legacy Plan" if not ctx.user_id else "No Active Plan"),
+        "captcha_daily_limit": int(plan.monthly_limit if plan else 0),
+        "limits": {
+            "captcha_daily_limit": int(plan.monthly_limit if plan else 0),
+            "rules": rules_limit,
+            "scripts": scripts_limit,
+            "script_storage_bytes": int(script_storage_mb) * 1024 * 1024 if script_storage_mb else None,
+            "max_devices": int(getattr(plan, "max_devices", 1) or 1) if plan else 0,
+        },
         "features": {
             "cloud_sync": bool(entitlements.get("sync", False)),
             "portable_pack": portable_pack,
@@ -208,7 +248,7 @@ def plan_payload(ctx: V2AuthContext) -> dict[str, Any]:
             "captcha": entitlements.get("captcha", True),
             "autofill": entitlements.get("autofill", True),
             "userscripts": entitlements.get("userscripts", True),
-        },
+        } if has_plan else no_plan_features,
     }
 
 

@@ -312,6 +312,56 @@ function isExtensionEnabled(settings = {}) {
   return settings.extensionEnabled !== false;
 }
 
+function planFeature(plan, key, fallback = true) {
+  if (!plan || typeof plan !== "object") return fallback;
+  if (plan.features && Object.prototype.hasOwnProperty.call(plan.features, key)) return plan.features[key];
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, key)) return plan.allowed_services[key];
+  return fallback;
+}
+
+function planLimit(plan, key) {
+  if (!plan || typeof plan !== "object") return undefined;
+  const limits = plan.limits && typeof plan.limits === "object" ? plan.limits : {};
+  if (Object.prototype.hasOwnProperty.call(limits, key)) return limits[key];
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, `${key}_limit`)) {
+    return plan.allowed_services[`${key}_limit`];
+  }
+  return undefined;
+}
+
+function numericPlanLimit(raw) {
+  if (raw === undefined || raw === null || raw === "") return Infinity;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : Infinity;
+}
+
+function allowedRuleLimit(auth = {}) {
+  const plan = auth.plan || {};
+  if (planFeature(plan, "autofill", true) !== true) return 0;
+  if (planFeature(plan, "unlimited_rules", false) === true) return Infinity;
+  return numericPlanLimit(planLimit(plan, "rules"));
+}
+
+function allowedScriptLimit(auth = {}) {
+  const plan = auth.plan || {};
+  if (planFeature(plan, "userscripts", true) !== true) return 0;
+  return numericPlanLimit(planLimit(plan, "scripts"));
+}
+
+function planAllowedRules(rules, auth = {}) {
+  const limit = allowedRuleLimit(auth);
+  return Number.isFinite(limit) ? rules.slice(0, limit) : rules;
+}
+
+function planAllowedScripts(scripts, auth = {}) {
+  const limit = allowedScriptLimit(auth);
+  return Number.isFinite(limit) ? scripts.slice(0, limit) : scripts;
+}
+
+function serializedLimit(limit) {
+  return Number.isFinite(limit) ? limit : null;
+}
+
 function cleanUserscriptTitle(script = {}) {
   const rawMeta = script.rawCode ? parseUserscript(script.rawCode || "") : {};
   return String(rawMeta.name || script.parsedMeta?.name || script.name || "Untitled Script")
@@ -469,13 +519,15 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     const activeProfile = activeProfileId(settings);
     const profileRules = rules.filter((rule) => itemMatchesProfile(rule, activeProfile));
     const profileScripts = scripts.filter((script) => itemMatchesProfile(script, activeProfile));
+    const planRules = planAllowedRules(profileRules.filter((rule) => rule.enabled !== false), data.fp_auth || {});
+    const planScripts = planAllowedScripts(profileScripts.filter((script) => script.enabled !== false), data.fp_auth || {});
     const extensionEnabled = isExtensionEnabled(settings);
     const autofillEnabled = extensionEnabled && settings.autofillEnabled !== false;
     const userscriptsEnabled = extensionEnabled && settings.userscriptsEnabled !== false;
     const activeTab = await getActiveSupportedTab().catch(() => null);
     const activeUrl = activeTab?.url || "";
     const currentPageScripts = activeUrl && userscriptsEnabled
-      ? profileScripts.filter((script) => userscriptMatchesUrl({ ...script, enabled: true }, activeUrl))
+      ? planScripts.filter((script) => userscriptMatchesUrl({ ...script, enabled: true }, activeUrl))
       : [];
     return ok({
       status: {
@@ -489,8 +541,8 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
         } : null,
         counts: {
           rules: profileRules.length,
-          matchingRules: activeUrl && autofillEnabled ? profileRules.filter((rule) => ruleMatchesUrl(rule, activeUrl)).length : null,
-          scripts: userscriptsEnabled ? profileScripts.filter((script) => script.enabled !== false).length : 0,
+          matchingRules: activeUrl && autofillEnabled ? planRules.filter((rule) => ruleMatchesUrl(rule, activeUrl)).length : null,
+          scripts: userscriptsEnabled ? planScripts.length : 0,
           matchingScripts: activeUrl && userscriptsEnabled ? currentPageScripts.filter((script) => script.enabled !== false).length : null
         },
         runningScripts: currentPageScripts.map((script) => ({
@@ -500,6 +552,21 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
           enabled: script.enabled !== false,
           source: script.source || "local"
         })).slice(0, 8)
+      }
+    });
+  });
+
+  registerMessageHandler("GET_RUNTIME_PLAN_LIMITS", async () => {
+    const data = await getExtensionStorage(["fp_auth"]);
+    const auth = data.fp_auth || {};
+    return ok({
+      limits: {
+        rules: serializedLimit(allowedRuleLimit(auth)),
+        scripts: serializedLimit(allowedScriptLimit(auth))
+      },
+      features: {
+        autofill: planFeature(auth.plan || {}, "autofill", true) === true,
+        userscripts: planFeature(auth.plan || {}, "userscripts", true) === true
       }
     });
   });

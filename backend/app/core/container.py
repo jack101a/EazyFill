@@ -93,7 +93,7 @@ def build_container(settings: Settings) -> Container:
 
     # New scalable services (SQLAlchemy-based)
     user_service = UserService(session_factory=get_session)
-    subscription_service = SubscriptionService(session_factory=get_session)
+    subscription_service = SubscriptionService(session_factory=get_session, settings=settings)
     payment_service = PaymentService(session_factory=get_session, settings=settings)
     audit_service = AuditService(session_factory=get_session)
     admin_notification_service = AdminNotificationService(session_factory=get_session)
