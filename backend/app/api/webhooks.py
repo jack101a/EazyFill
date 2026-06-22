@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["payment-webhooks"])
 
+IGNORED_RAZORPAY_WEBHOOK_EVENTS = {
+    "qr_code.closed",
+    "qr_code.created",
+    "qr_code.credited",
+}
+
 
 def _razorpay_credentials(request: Request) -> tuple[str, str]:
     container = request.app.state.container
@@ -688,6 +694,13 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
 
         payment_entity = _payment_entity(payload)
         order_entity = _order_entity(payload)
+        if event_type in IGNORED_RAZORPAY_WEBHOOK_EVENTS:
+            webhook_event.status = "processed"
+            webhook_event.error_message = ""
+            webhook_event.processed_at = datetime.now(timezone.utc)
+            session.commit()
+            return JSONResponse({"ok": True, "event": event_type, "ignored": True})
+
         payment = _find_payment(session, payment_entity, order_entity)
         if not payment:
             webhook_event.status = "failed"

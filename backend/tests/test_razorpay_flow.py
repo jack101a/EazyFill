@@ -305,3 +305,45 @@ def test_razorpay_webhook_uses_header_event_id_and_deduplicates(monkeypatch):
         assert event.status == "processed"
     finally:
         session.close()
+
+
+def test_razorpay_webhook_ignores_qr_code_events(monkeypatch):
+    Session = _session_factory()
+    app = _app(Session)
+    monkeypatch.setattr(webhooks, "get_session", Session)
+
+    payload = {
+        "event": "qr_code.created",
+        "payload": {
+            "qr_code": {
+                "entity": {
+                    "id": "qr_test_123",
+                    "status": "active",
+                }
+            }
+        },
+    }
+    raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    signature = hmac.new(b"whsec_test", raw_body, hashlib.sha256).hexdigest()
+
+    response = TestClient(app).post(
+        "/api/webhooks/razorpay",
+        content=raw_body,
+        headers={
+            "X-Razorpay-Signature": signature,
+            "X-Razorpay-Event-Id": "evt_qr_test_123",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "event": "qr_code.created", "ignored": True}
+    app.state.container.payment_service.activate_payment.assert_not_called()
+    session = Session()
+    try:
+        event = session.query(PaymentWebhookEvent).one()
+        assert event.event_id == "evt_qr_test_123"
+        assert event.status == "processed"
+        assert event.payment_id is None
+    finally:
+        session.close()
