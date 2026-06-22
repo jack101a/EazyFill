@@ -394,22 +394,24 @@ function setActionStates(status) {
   const counts = status?.counts || {};
   const credits = captchaCredits(status?.credits);
   const extensionEnabled = isExtensionEnabled();
-  const captchaEnabled = extensionEnabled && state.settings.captchaEnabled !== false;
-  const autofillEnabled = extensionEnabled && state.settings.autofillEnabled !== false;
+  const authenticated = !!status?.authenticated;
+  const runtime = status?.runtime || {};
+  const captchaEnabled = extensionEnabled && authenticated && state.settings.captchaEnabled !== false;
+  const autofillEnabled = extensionEnabled && authenticated && runtime.autofillAllowed !== false && state.settings.autofillEnabled !== false;
   const supportedPage = !!status?.activeTab;
   const matchingRules = counts.matchingRules == null
-    ? (supportedPage ? Number(counts.rules || 0) : 0)
+    ? (supportedPage ? Number(counts.activeRules || 0) : 0)
     : Number(counts.matchingRules || 0);
   const quotaReached = Number(credits.remaining ?? 1) <= 0;
   const busy = state.busyButtonId;
 
   setDisabled("record-rule", !!busy || !supportedPage || !autofillEnabled);
-  setDisabled("configure-captcha", !!busy || !extensionEnabled || !supportedPage);
-  setDisabled("popup-captcha-source-pick", !!busy || !extensionEnabled || !supportedPage);
-  setDisabled("popup-captcha-target-pick", !!busy || !extensionEnabled || !supportedPage);
-  setDisabled("simple-solve-captcha-btn", !!busy || !extensionEnabled);
+  setDisabled("configure-captcha", !!busy || !captchaEnabled || !supportedPage);
+  setDisabled("popup-captcha-source-pick", !!busy || !captchaEnabled || !supportedPage);
+  setDisabled("popup-captcha-target-pick", !!busy || !captchaEnabled || !supportedPage);
+  setDisabled("simple-solve-captcha-btn", !!busy || !captchaEnabled);
   setDisabled("simple-autofill-btn", !!busy || !supportedPage || !autofillEnabled || matchingRules === 0);
-  setDisabled("manage-scripts", !!busy || !extensionEnabled);
+  setDisabled("manage-scripts", !!busy || !extensionEnabled || !authenticated);
 }
 
 function renderPopupScripts(status = {}) {
@@ -418,6 +420,16 @@ function renderPopupScripts(status = {}) {
   const scripts = Array.isArray(status.runningScripts) ? status.runningScripts : [];
   list.textContent = "";
   if (!scripts.length) {
+    const item = document.createElement("div");
+    item.className = "popup-script-item muted";
+    const text = document.createElement("div");
+    text.className = "popup-script-empty";
+    const savedCount = Number(status.counts?.scripts || 0);
+    text.textContent = !status.authenticated
+      ? savedCount ? `${savedCount} saved. Sign in to run.` : "Sign in to run userscripts."
+      : savedCount ? "No userscripts running on this page." : "No userscripts saved.";
+    item.append(text);
+    list.append(item);
     return;
   }
   for (const script of scripts) {
@@ -497,38 +509,52 @@ function renderStatus(status) {
 
   const counts = status.counts || {};
   const supportedPage = !!status.activeTab;
-  const quotaReached = Number(credits.remaining ?? 1) <= 0;
+  const runtime = status.runtime || {};
+  const creditLimit = Number(credits.limit ?? 0);
+  const creditsUnavailable = authenticated && creditLimit <= 0;
+  const quotaReached = !creditsUnavailable && Number(credits.remaining ?? 1) <= 0;
   $("captcha-status").textContent = !extensionEnabled
     ? "Extension off"
+    : !authenticated
+    ? "Sign in required"
     : state.settings.captchaEnabled === false
     ? "Paused"
     : !supportedPage ? "Open a web page"
+      : creditsUnavailable ? "Credits syncing"
       : quotaReached ? "Quota reached" : "Ready";
   $("autofill-status").textContent = !extensionEnabled
     ? "Extension off"
+    : !authenticated
+    ? counts.rules ? `${counts.rules} saved. Sign in to run.` : "Sign in required"
+    : runtime.autofillAllowed === false
+    ? "Not in current plan"
     : state.settings.autofillEnabled === false
     ? "Paused"
     : !supportedPage ? "Open a web page"
       : counts.matchingRules !== null && counts.matchingRules !== undefined
-      ? counts.matchingRules ? `${counts.matchingRules} match this page` : "No rules match this page"
-      : counts.rules ? `${counts.rules} rules saved` : "No rules saved";
+      ? counts.matchingRules ? `${counts.matchingRules} ready on this page` : counts.activeRules ? "No active rules match" : counts.rules ? "Saved, not active" : "No rules saved"
+      : counts.activeRules ? `${counts.activeRules}/${counts.rules || counts.activeRules} active` : counts.rules ? "Saved, not active" : "No rules saved";
   $("scripts-status").textContent = !extensionEnabled
     ? "Extension off"
+    : !authenticated
+    ? counts.scripts ? `${counts.scripts} saved. Sign in to run.` : "Sign in required"
+    : runtime.userscriptsAllowed === false
+    ? "Not in current plan"
     : state.settings.userscriptsEnabled === false
     ? "Paused"
     : !supportedPage ? "Open a web page"
       : counts.matchingScripts !== null && counts.matchingScripts !== undefined
-      ? counts.matchingScripts ? `${counts.matchingScripts} EazyFill match${Number(counts.matchingScripts) === 1 ? "" : "es"}`
-        : counts.scripts ? "No EazyFill scripts match" : "No EazyFill scripts"
-      : `${counts.scripts || 0} EazyFill active`;
+      ? counts.matchingScripts ? `${counts.matchingScripts} running on this page`
+        : counts.activeScripts ? "No active scripts match" : counts.scripts ? "Saved, not active" : "No scripts saved"
+      : counts.activeScripts ? `${counts.activeScripts}/${counts.scripts || counts.activeScripts} active` : counts.scripts ? "Saved, not active" : "No scripts saved";
   renderPopupScripts(status);
 
-  document.querySelector('[data-module="captcha"]')?.classList.toggle("is-paused", !extensionEnabled || state.settings.captchaEnabled === false || quotaReached);
-  document.querySelector('[data-module="autofill"]')?.classList.toggle("is-paused", !extensionEnabled || state.settings.autofillEnabled === false);
-  document.querySelector('[data-module="scripts"]')?.classList.toggle("is-paused", !extensionEnabled || state.settings.userscriptsEnabled === false);
+  document.querySelector('[data-module="captcha"]')?.classList.toggle("is-paused", !extensionEnabled || !authenticated || state.settings.captchaEnabled === false || quotaReached);
+  document.querySelector('[data-module="autofill"]')?.classList.toggle("is-paused", !extensionEnabled || !authenticated || runtime.autofillAllowed === false || state.settings.autofillEnabled === false);
+  document.querySelector('[data-module="scripts"]')?.classList.toggle("is-paused", !extensionEnabled || !authenticated || runtime.userscriptsAllowed === false || state.settings.userscriptsEnabled === false);
   for (const id of ["toggle-captcha", "toggle-autofill", "toggle-scripts"]) {
     const toggle = $(id);
-    if (toggle) toggle.disabled = !extensionEnabled;
+    if (toggle) toggle.disabled = !extensionEnabled || !authenticated;
   }
 
   setActionStates(status);
@@ -889,7 +915,11 @@ async function softAction(type, fallbackMessage, preferredButtonId = "") {
     return;
   }
   if (type === "AUTOFILL_EXECUTE_CURRENT" && !response.executedRules) {
-    setAlert(fallbackMessage, "warning");
+    const planLimited = Number(response.planLimitedRules || 0);
+    const matched = Number(response.matchedRules || 0);
+    setAlert(planLimited > 0 && matched > 0
+      ? "Matching autofill rule is saved but not active in your current plan."
+      : fallbackMessage, "warning");
     return;
   }
   setAlert("");

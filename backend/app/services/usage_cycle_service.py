@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Optional
-
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
@@ -14,14 +12,6 @@ from app.core.models import UsageCycle, UserSubscription, User
 def _utcnow_db() -> datetime:
     """Naive UTC datetime for DB comparisons; SQLite drops timezone info."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _as_naive_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class UsageCycleService:
@@ -39,29 +29,6 @@ class UsageCycleService:
         try:
             now = _utcnow_db()
 
-            # Find active cycle
-            cycle = (
-                session.query(UsageCycle)
-                .filter(
-                    UsageCycle.user_id == user_id,
-                    UsageCycle.cycle_start_at <= now,
-                    UsageCycle.cycle_end_at > now,
-                )
-                .order_by(UsageCycle.cycle_start_at.desc())
-                .first()
-            )
-            if cycle:
-                sub = (
-                    session.query(UserSubscription)
-                    .filter(UserSubscription.id == int(cycle.subscription_id or 0))
-                    .first()
-                )
-                end_at = _as_naive_utc(sub.end_at) if sub else None
-                if sub and sub.status == "active" and (end_at is None or end_at >= now):
-                    return cycle
-                return None
-
-            # No active cycle — try to create from active subscription
             sub = (
                 session.query(UserSubscription)
                 .filter(
@@ -69,12 +36,28 @@ class UsageCycleService:
                     UserSubscription.status == "active",
                     or_(UserSubscription.end_at.is_(None), UserSubscription.end_at >= now),
                 )
-                .order_by(UserSubscription.created_at.desc())
+                .order_by(UserSubscription.created_at.desc(), UserSubscription.id.desc())
                 .first()
             )
             if not sub:
                 return None
 
+            # Find active cycle
+            cycle = (
+                session.query(UsageCycle)
+                .filter(
+                    UsageCycle.user_id == user_id,
+                    UsageCycle.subscription_id == int(sub.id),
+                    UsageCycle.cycle_start_at <= now,
+                    UsageCycle.cycle_end_at > now,
+                )
+                .order_by(UsageCycle.cycle_start_at.desc(), UsageCycle.id.desc())
+                .first()
+            )
+            if cycle:
+                return cycle
+
+            # No active cycle — try to create from active subscription
             # Create new cycle
             cycle_start = sub.current_cycle_start_at or now
             cycle_end = sub.current_cycle_end_at or (now + timedelta(days=30))

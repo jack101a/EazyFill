@@ -5,8 +5,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.db import Base
-from app.core.models import SubscriptionPlan, User, UserSubscription
+from app.core.models import SubscriptionPlan, UsageCycle, User, UserSubscription
 from app.services.subscription_service import SubscriptionService
+from app.services.usage_cycle_service import UsageCycleService
 
 
 BOOTSTRAP_PLANS = [
@@ -161,5 +162,66 @@ def test_expired_paid_subscription_downgrades_to_configured_free_plan():
         assert sub.status == "active"
         assert session.query(UserSubscription).filter(UserSubscription.status == "expired").count() == 1
         assert session.query(UserSubscription).filter(UserSubscription.status == "active").count() == 1
+    finally:
+        session.close()
+
+
+def test_usage_cycle_prefers_current_subscription_cycle_after_plan_change():
+    service, Session = _service(_settings())
+    service.ensure_default_checkout_plans(codes={"free", "basic"})
+    session = Session()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        user = User(full_name="Cycle User", email="cycle@example.test", status="active")
+        session.add(user)
+        session.flush()
+        free = session.query(SubscriptionPlan).filter(SubscriptionPlan.code == "free").one()
+        basic = session.query(SubscriptionPlan).filter(SubscriptionPlan.code == "basic").one()
+        old_sub = UserSubscription(
+            user_id=user.id,
+            plan_id=free.id,
+            status="expired",
+            monthly_limit_snapshot=0,
+            start_at=now - timedelta(days=1),
+            end_at=now + timedelta(days=29),
+            current_cycle_start_at=now - timedelta(minutes=10),
+            current_cycle_end_at=now + timedelta(days=29),
+        )
+        new_sub = UserSubscription(
+            user_id=user.id,
+            plan_id=basic.id,
+            status="active",
+            monthly_limit_snapshot=basic.monthly_limit,
+            start_at=now,
+            end_at=now + timedelta(days=30),
+            current_cycle_start_at=now,
+            current_cycle_end_at=now + timedelta(days=30),
+        )
+        session.add_all([old_sub, new_sub])
+        session.flush()
+        session.add(UsageCycle(
+            user_id=user.id,
+            subscription_id=old_sub.id,
+            cycle_start_at=now - timedelta(minutes=10),
+            cycle_end_at=now + timedelta(days=29),
+            monthly_limit=0,
+            used_count=0,
+        ))
+        session.commit()
+        user_id = int(user.id)
+        new_sub_id = int(new_sub.id)
+    finally:
+        session.close()
+
+    usage = UsageCycleService(Session).get_user_usage(user_id)
+
+    assert usage["has_subscription"] is True
+    assert usage["limit"] == 500
+    assert usage["remaining"] == 500
+
+    session = Session()
+    try:
+        cycle = session.query(UsageCycle).filter(UsageCycle.id == usage["cycle_id"]).one()
+        assert cycle.subscription_id == new_sub_id
     finally:
         session.close()

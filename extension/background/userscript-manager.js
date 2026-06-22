@@ -151,6 +151,11 @@ async function getUserscriptsEnabled() {
     && data.fp_settings?.userscriptsEnabled !== false;
 }
 
+function isAuthenticatedAuth(auth = {}) {
+  return !!String(auth.sessionToken || auth.session_token || auth.apiKey || auth.api_key || "").trim()
+    && auth.valid !== false;
+}
+
 function activeProfileId(settings = {}) {
   return String(settings.activeProfileId || "default").trim() || "default";
 }
@@ -179,6 +184,19 @@ function planFeature(plan, key, fallback = true) {
   return fallback;
 }
 
+function featureEnabled(plan, key, fallback = false) {
+  const value = planFeature(plan, key, fallback);
+  return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true";
+}
+
+function hasRuntimePlanData(plan) {
+  if (!plan || typeof plan !== "object") return false;
+  const features = plan.features && typeof plan.features === "object" ? plan.features : {};
+  const services = plan.allowed_services && typeof plan.allowed_services === "object" ? plan.allowed_services : {};
+  const limits = plan.limits && typeof plan.limits === "object" ? plan.limits : {};
+  return Object.keys(features).length > 0 || Object.keys(services).length > 0 || Object.keys(limits).length > 0;
+}
+
 function planLimit(plan, key) {
   if (!plan || typeof plan !== "object") return undefined;
   const limits = plan.limits && typeof plan.limits === "object" ? plan.limits : {};
@@ -190,8 +208,9 @@ function planLimit(plan, key) {
 }
 
 function allowedScriptLimit(auth = {}) {
+  if (!isAuthenticatedAuth(auth)) return 0;
   const plan = auth.plan || {};
-  if (planFeature(plan, "userscripts", true) !== true) return 0;
+  if (!hasRuntimePlanData(plan) || !featureEnabled(plan, "userscripts", false)) return 0;
   const raw = planLimit(plan, "scripts");
   if (raw === undefined || raw === null || raw === "") return Infinity;
   const value = Number(raw);
@@ -558,9 +577,10 @@ export async function registerStoredUserscripts() {
     getProtectedValues(["fp_auth", "fp_scripts", "fp_settings"]),
     getUserscriptsEnabled()
   ]);
+  const authenticated = isAuthenticatedAuth(data.fp_auth || {});
   const scripts = Array.isArray(data.fp_scripts) ? data.fp_scripts : [];
   const activeProfile = activeProfileId(data.fp_settings || {});
-  const candidateScripts = userscriptsEnabled
+  const candidateScripts = authenticated && userscriptsEnabled
     ? scripts.filter((script) => script && script.enabled !== false && script.rawCode && scriptMatchesProfile(script, activeProfile))
     : [];
   const enabledScripts = applyScriptPlanLimit(candidateScripts, data.fp_auth || {});
@@ -575,6 +595,9 @@ export async function registerStoredUserscripts() {
 
   registeredScriptCapabilities.clear();
   documentCapabilities.clear();
+  if (!authenticated) {
+    return { ok: true, count: 0, disabled: true, authRequired: true, ...await getUserscriptRuntimeStatus() };
+  }
   if (!userscriptsEnabled) {
     return { ok: true, count: 0, disabled: true, ...await getUserscriptRuntimeStatus() };
   }
@@ -966,12 +989,12 @@ if (chrome.runtime.onUserScriptMessage?.addListener) {
 
 if (chrome.storage.onChanged?.addListener) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes.fp_settings) return;
-    const oldSettings = changes.fp_settings.oldValue || {};
-    const newSettings = changes.fp_settings.newValue || {};
+    if (areaName !== "local" || (!changes.fp_settings && !changes.fp_auth)) return;
+    const oldSettings = changes.fp_settings?.oldValue || {};
+    const newSettings = changes.fp_settings?.newValue || {};
     const before = userscriptsAllowed(oldSettings);
     const after = userscriptsAllowed(newSettings);
-    if (before === after && activeProfileId(oldSettings) === activeProfileId(newSettings)) return;
+    if (!changes.fp_auth && before === after && activeProfileId(oldSettings) === activeProfileId(newSettings)) return;
     registerStoredUserscripts().catch((error) => {
       console.debug("[EazyFill] Userscript policy refresh failed:", error?.message || error);
     });

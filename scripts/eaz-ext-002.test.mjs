@@ -158,6 +158,47 @@ assert.equal(response.data.fp_settings.userscriptsEnabled, true);
 assert.equal(response.data.fp_credits, undefined);
 assert.equal(response.data.fp_sync_meta, undefined);
 
+let runtimeRefreshCalled = false;
+registerCoreMessageHandlers({
+  authManager: {
+    async refreshCachedStatus() {
+      runtimeRefreshCalled = true;
+      await send({
+        type: "SET_EXTENSION_STORAGE",
+        values: {
+          fp_auth: {
+            sessionToken: "session-secret",
+            valid: true,
+            plan: {
+              name: "Free",
+              features: { autofill: true, userscripts: true },
+              limits: { rules: 3, scripts: 2 }
+            }
+          }
+        }
+      }, popupSender);
+      return { ok: true };
+    }
+  }
+});
+await send({
+  type: "SET_EXTENSION_STORAGE",
+  values: {
+    fp_auth: {
+      sessionToken: "session-secret",
+      valid: true,
+      plan: { name: "Free" }
+    }
+  }
+}, popupSender);
+response = await send({ type: "GET_RUNTIME_PLAN_LIMITS" }, popupSender);
+assert.equal(response.ok, true);
+assert.equal(runtimeRefreshCalled, true);
+assert.equal(response.features.autofill, true);
+assert.equal(response.features.userscripts, true);
+assert.equal(response.limits.rules, 3);
+assert.equal(response.limits.scripts, 2);
+
 response = await send({
   type: "SET_EXTENSION_STORAGE",
   values: { fp_settings: { autofillEnabled: false } }

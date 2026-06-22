@@ -745,6 +745,19 @@ html[data-theme="light"] .module-detail {
   background: var(--card);
 }
 
+.popup-script-item.muted {
+  grid-template-columns: minmax(0, 1fr);
+  color: var(--soft);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.popup-script-empty {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .popup-script-item .switch {
   width: 34px;
   height: 20px;

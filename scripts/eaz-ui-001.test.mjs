@@ -171,7 +171,7 @@ async function installChromeMock(page, mode) {
     const availableStatus = {
       authenticated: isAuthenticated,
       activeTab: { url: "https://example.com/form", hostname: "example.com" },
-      plan: { name: "Free" },
+      plan: { name: "Free", features: { autofill: true, userscripts: true, captcha: true } },
       credits: { captcha: { remaining: 5, dailyLimit: 10, usedToday: 1 } },
       settings: {
         activeProfileId: "work",
@@ -181,7 +181,24 @@ async function installChromeMock(page, mode) {
         seenWelcome: true,
         theme: "dark"
       },
-      counts: { rules: 2, matchingRules: 0, scripts: 2, matchingScripts: 0 }
+      runtime: {
+        extensionEnabled: true,
+        autofillAllowed: true,
+        userscriptsAllowed: true,
+        authRequired: false
+      },
+      counts: {
+        rules: 1,
+        enabledRules: 1,
+        activeRules: 1,
+        limitedRules: 0,
+        matchingRules: 0,
+        scripts: 2,
+        enabledScripts: 2,
+        activeScripts: 2,
+        limitedScripts: 0,
+        matchingScripts: 0
+      }
     };
     const currentStatus = () => {
       const pageScripts = (Array.isArray(extensionStorage.fp_scripts) ? extensionStorage.fp_scripts : [])
@@ -195,13 +212,23 @@ async function installChromeMock(page, mode) {
       return {
         ...availableStatus,
         authenticated: isAuthenticated,
-        plan: isAuthenticated ? { name: "Free" } : null,
+        plan: isAuthenticated ? { name: "Free", features: { autofill: true, userscripts: true, captcha: true } } : null,
+        runtime: {
+          extensionEnabled: true,
+          autofillAllowed: isAuthenticated,
+          userscriptsAllowed: isAuthenticated,
+          authRequired: !isAuthenticated
+        },
         counts: {
           ...availableStatus.counts,
+          activeRules: isAuthenticated ? 1 : 0,
+          matchingRules: isAuthenticated ? 0 : null,
           scripts: pageScripts.filter((script) => script.enabled !== false).length,
-          matchingScripts: pageScripts.filter((script) => script.enabled !== false).length
+          enabledScripts: pageScripts.filter((script) => script.enabled !== false).length,
+          activeScripts: isAuthenticated ? pageScripts.filter((script) => script.enabled !== false).length : 0,
+          matchingScripts: isAuthenticated ? pageScripts.filter((script) => script.enabled !== false).length : null
         },
-        runningScripts: pageScripts
+        runningScripts: isAuthenticated ? pageScripts : []
       };
     };
     const runtime = {
@@ -516,8 +543,8 @@ window.__greasyForkImport = true;
   await popupPage.goto(`${baseUrl}/popup/popup.html`);
   await popupPage.waitForSelector("#app-view.active");
   await captureSnapshot(popupPage, "popup-authenticated");
-  assert.equal(await popupPage.locator("#autofill-status").innerText(), "No rules match this page");
-  assert.equal(await popupPage.locator("#scripts-status").innerText(), "2 EazyFill matches");
+  assert.equal(await popupPage.locator("#autofill-status").innerText(), "No active rules match");
+  assert.equal(await popupPage.locator("#scripts-status").innerText(), "2 running on this page");
   assert.equal(await popupPage.locator("#account-summary").count(), 0);
   assert.equal(await popupPage.locator("#simple-autofill-btn").isDisabled(), true);
   assert.equal(await popupPage.locator("#simple-solve-captcha-btn").isDisabled(), false);

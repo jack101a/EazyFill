@@ -24,6 +24,7 @@ const CONTENT_STORAGE_READ_KEYS = new Set([
 ]);
 
 const CONTENT_STORAGE_WRITE_KEYS = new Set();
+const ACCOUNT_STATUS_REFRESH_MS = 30 * 1000;
 
 function ok(data = {}) {
   return { ok: true, ...data };
@@ -221,6 +222,15 @@ function ruleMatchesUrl(rule, url) {
     const site = normalizeAutofillSite(rule);
     const pattern = String(site.pattern || "").replace(/^https?:\/\//i, "").replace(/^www\./i, "").toLowerCase();
     if (!pattern || pattern === "*") return true;
+    if (site.matchMode === "url_prefix") return url.startsWith(String(site.pattern || ""));
+    if (site.matchMode === "url_pattern") return globMatches(url, String(site.pattern || "*"));
+    if (site.matchMode === "regex") {
+      try {
+        return new RegExp(String(site.pattern || "")).test(url);
+      } catch (_) {
+        return false;
+      }
+    }
     if (site.matchMode === "fullUrl") return String(site.pattern || "") === url || globMatches(url, String(site.pattern || ""));
     if (site.matchMode === "domainPath") {
       const current = `${host}${parsed.pathname || "/"}`;
@@ -229,7 +239,9 @@ function ruleMatchesUrl(rule, url) {
         : current === pattern || current.startsWith(`${pattern.replace(/\/$/, "")}/`);
     }
     if (site.matchMode === "path") return globMatches(parsed.pathname || "/", String(site.pattern || "*"));
-    return host === pattern || host.endsWith(`.${pattern}`) || globMatches(host, pattern);
+    const pathPattern = String(site.path || "").trim();
+    const pathMatches = !pathPattern || pathPattern === "*" || globMatches(parsed.pathname || "/", pathPattern);
+    return pathMatches && (host === pattern || host.endsWith(`.${pattern}`) || globMatches(host, pattern));
   } catch (_) {
     return false;
   }
@@ -312,11 +324,73 @@ function isExtensionEnabled(settings = {}) {
   return settings.extensionEnabled !== false;
 }
 
+function isAuthenticatedAuth(auth = {}) {
+  return !!String(auth.sessionToken || auth.session_token || auth.apiKey || auth.api_key || "").trim()
+    && auth.valid !== false;
+}
+
 function planFeature(plan, key, fallback = true) {
   if (!plan || typeof plan !== "object") return fallback;
   if (plan.features && Object.prototype.hasOwnProperty.call(plan.features, key)) return plan.features[key];
   if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, key)) return plan.allowed_services[key];
   return fallback;
+}
+
+function featureEnabled(plan, key, fallback = false) {
+  const value = planFeature(plan, key, fallback);
+  return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true";
+}
+
+function hasRuntimePlanData(plan) {
+  if (!plan || typeof plan !== "object") return false;
+  const features = plan.features && typeof plan.features === "object" ? plan.features : {};
+  const services = plan.allowed_services && typeof plan.allowed_services === "object" ? plan.allowed_services : {};
+  const limits = plan.limits && typeof plan.limits === "object" ? plan.limits : {};
+  return Object.keys(features).length > 0 || Object.keys(services).length > 0 || Object.keys(limits).length > 0;
+}
+
+function numericValue(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") {
+      const number = Number(value);
+      if (Number.isFinite(number)) return number;
+    }
+  }
+  return 0;
+}
+
+function planCaptchaLimit(plan = {}) {
+  const limits = plan?.limits && typeof plan.limits === "object" ? plan.limits : {};
+  return numericValue(limits.captcha_daily_limit, plan.captcha_daily_limit, plan.monthly_limit);
+}
+
+function creditsCaptchaLimit(credits = {}) {
+  const captcha = credits?.captcha || credits || {};
+  return numericValue(captcha.dailyLimit, captcha.daily_limit, captcha.captcha_daily_limit);
+}
+
+function shouldRefreshRuntimeAuth(auth = {}, credits = null, options = {}) {
+  if (!isAuthenticatedAuth(auth)) return false;
+  if (!hasRuntimePlanData(auth.plan)) return true;
+  if (options.refreshStale) {
+    const lastVerifiedAt = Number(auth.lastVerifiedAt || auth.last_verified_at || 0);
+    if (!lastVerifiedAt || Date.now() - lastVerifiedAt > ACCOUNT_STATUS_REFRESH_MS) return true;
+  }
+  if (options.refreshCredits) {
+    const expectedLimit = planCaptchaLimit(auth.plan || {});
+    const currentLimit = creditsCaptchaLimit(credits || {});
+    if (!credits || (expectedLimit > 0 && currentLimit <= 0)) return true;
+  }
+  return false;
+}
+
+async function getRuntimeStorage(keys, authManager, options = {}) {
+  let data = await getExtensionStorage(keys);
+  if (shouldRefreshRuntimeAuth(data.fp_auth || {}, data.fp_credits || null, options) && authManager?.refreshCachedStatus) {
+    await authManager.refreshCachedStatus().catch(() => null);
+    data = await getExtensionStorage(keys);
+  }
+  return data;
 }
 
 function planLimit(plan, key) {
@@ -336,15 +410,17 @@ function numericPlanLimit(raw) {
 }
 
 function allowedRuleLimit(auth = {}) {
+  if (!isAuthenticatedAuth(auth)) return 0;
   const plan = auth.plan || {};
-  if (planFeature(plan, "autofill", true) !== true) return 0;
-  if (planFeature(plan, "unlimited_rules", false) === true) return Infinity;
+  if (!hasRuntimePlanData(plan) || !featureEnabled(plan, "autofill", false)) return 0;
+  if (featureEnabled(plan, "unlimited_rules", false)) return Infinity;
   return numericPlanLimit(planLimit(plan, "rules"));
 }
 
 function allowedScriptLimit(auth = {}) {
+  if (!isAuthenticatedAuth(auth)) return 0;
   const plan = auth.plan || {};
-  if (planFeature(plan, "userscripts", true) !== true) return 0;
+  if (!hasRuntimePlanData(plan) || !featureEnabled(plan, "userscripts", false)) return 0;
   return numericPlanLimit(planLimit(plan, "scripts"));
 }
 
@@ -509,21 +585,27 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
   });
 
   registerMessageHandler("GET_STATUS", async () => {
-    if (authManager?.refreshCachedStatus) {
-      authManager.refreshCachedStatus().catch(() => null);
-    }
-    const data = await getExtensionStorage(["fp_auth", "fp_settings", "fp_credits", "fp_rules", "fp_scripts"]);
+    const data = await getRuntimeStorage(["fp_auth", "fp_settings", "fp_credits", "fp_rules", "fp_scripts"], authManager, {
+      refreshCredits: true,
+      refreshStale: true
+    });
+    const auth = data.fp_auth || {};
+    const authenticated = isAuthenticatedAuth(auth);
     const rules = Array.isArray(data.fp_rules) ? data.fp_rules : [];
     const scripts = Array.isArray(data.fp_scripts) ? data.fp_scripts : [];
     const settings = data.fp_settings || {};
     const activeProfile = activeProfileId(settings);
     const profileRules = rules.filter((rule) => itemMatchesProfile(rule, activeProfile));
     const profileScripts = scripts.filter((script) => itemMatchesProfile(script, activeProfile));
-    const planRules = planAllowedRules(profileRules.filter((rule) => rule.enabled !== false), data.fp_auth || {});
-    const planScripts = planAllowedScripts(profileScripts.filter((script) => script.enabled !== false), data.fp_auth || {});
+    const enabledRules = profileRules.filter((rule) => rule.enabled !== false);
+    const enabledScripts = profileScripts.filter((script) => script.enabled !== false);
+    const planRules = planAllowedRules(enabledRules, auth);
+    const planScripts = planAllowedScripts(enabledScripts, auth);
     const extensionEnabled = isExtensionEnabled(settings);
-    const autofillEnabled = extensionEnabled && settings.autofillEnabled !== false;
-    const userscriptsEnabled = extensionEnabled && settings.userscriptsEnabled !== false;
+    const autofillAllowed = authenticated && featureEnabled(auth.plan || {}, "autofill", false);
+    const userscriptsAllowed = authenticated && featureEnabled(auth.plan || {}, "userscripts", false);
+    const autofillEnabled = extensionEnabled && autofillAllowed && settings.autofillEnabled !== false;
+    const userscriptsEnabled = extensionEnabled && userscriptsAllowed && settings.userscriptsEnabled !== false;
     const activeTab = await getActiveSupportedTab().catch(() => null);
     const activeUrl = activeTab?.url || "";
     const currentPageScripts = activeUrl && userscriptsEnabled
@@ -531,18 +613,30 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
       : [];
     return ok({
       status: {
-        authenticated: !!String(data.fp_auth?.sessionToken || data.fp_auth?.apiKey || "").trim() && data.fp_auth?.valid !== false,
-        plan: data.fp_auth?.plan || null,
+        authenticated,
+        plan: auth.plan || null,
         credits: data.fp_credits || null,
         settings,
         activeTab: activeUrl ? {
           url: activeUrl,
           hostname: new URL(activeUrl).hostname
         } : null,
+        runtime: {
+          extensionEnabled,
+          autofillAllowed,
+          userscriptsAllowed,
+          authRequired: !authenticated
+        },
         counts: {
           rules: profileRules.length,
+          enabledRules: enabledRules.length,
+          activeRules: autofillEnabled ? planRules.length : 0,
+          limitedRules: Math.max(0, enabledRules.length - planRules.length),
           matchingRules: activeUrl && autofillEnabled ? planRules.filter((rule) => ruleMatchesUrl(rule, activeUrl)).length : null,
-          scripts: userscriptsEnabled ? planScripts.length : 0,
+          scripts: profileScripts.length,
+          enabledScripts: enabledScripts.length,
+          activeScripts: userscriptsEnabled ? planScripts.length : 0,
+          limitedScripts: Math.max(0, enabledScripts.length - planScripts.length),
           matchingScripts: activeUrl && userscriptsEnabled ? currentPageScripts.filter((script) => script.enabled !== false).length : null
         },
         runningScripts: currentPageScripts.map((script) => ({
@@ -557,17 +651,19 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
   });
 
   registerMessageHandler("GET_RUNTIME_PLAN_LIMITS", async () => {
-    const data = await getExtensionStorage(["fp_auth"]);
+    const data = await getRuntimeStorage(["fp_auth"], authManager);
     const auth = data.fp_auth || {};
+    const authenticated = isAuthenticatedAuth(auth);
     return ok({
       limits: {
         rules: serializedLimit(allowedRuleLimit(auth)),
         scripts: serializedLimit(allowedScriptLimit(auth))
       },
       features: {
-        autofill: planFeature(auth.plan || {}, "autofill", true) === true,
-        userscripts: planFeature(auth.plan || {}, "userscripts", true) === true
-      }
+        autofill: authenticated && featureEnabled(auth.plan || {}, "autofill", false),
+        userscripts: authenticated && featureEnabled(auth.plan || {}, "userscripts", false)
+      },
+      authenticated
     });
   });
 
