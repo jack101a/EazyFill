@@ -177,16 +177,55 @@
     return "set_value";
   }
 
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return "";
+  }
+
+  function selectorFromStep(step = {}) {
+    const direct = firstNonEmpty(
+      step.selector,
+      step.target,
+      step.targetSelector,
+      step.target_selector,
+      step.selectorCss,
+      step.selector_css,
+      step.cssSelector,
+      step.css_selector,
+      step.css,
+      step.primary
+    );
+    if (direct) return direct;
+    const xpath = firstNonEmpty(step.xpath, step.x_path);
+    if (xpath) return { strategy: "xpath", primary: xpath, xpath };
+    const id = firstNonEmpty(step.elementId, step.element_id, step.inputId, step.input_id, step.id);
+    if (id) return { strategy: "id", primary: `#${id}`, id, element_id: id };
+    const name = firstNonEmpty(step.inputName, step.input_name, step.nameAttr, step.name_attr, step.selectorName, step.selector_name, step.name);
+    if (name) return { strategy: "name", primary: `[name="${name}"]`, name };
+    return "";
+  }
+
+  function valueFromStep(step = {}) {
+    return step.value
+      ?? step.text
+      ?? step.fill
+      ?? step.defaultValue
+      ?? step.default_value
+      ?? "";
+  }
+
   function normalizeStep(step = {}, index = 0) {
     const runtime = step.runtime || {};
     return {
       ...step,
       order: Number(step.order || index + 1),
-      action: normalizeAction(step.action),
-      selector: step.selector || step.target || "",
-      value: step.value ?? "",
-      fieldKey: step.fieldKey || step.field_key || "",
-      label: step.label || "",
+      action: normalizeAction(step.action || step.type),
+      selector: selectorFromStep(step),
+      value: valueFromStep(step),
+      fieldKey: step.fieldKey || step.field_key || step.key || step.name || "",
+      label: step.label || step.title || step.name || step.fieldKey || step.field_key || "",
       required: step.required !== false && runtime.required !== false,
       runtime: {
         ...runtime,
@@ -197,16 +236,25 @@
     };
   }
 
+  function ruleStepSource(rule = {}) {
+    if (Array.isArray(rule.steps) && rule.steps.length) return rule.steps;
+    if (Array.isArray(rule.actions) && rule.actions.length) return rule.actions;
+    if (Array.isArray(rule.fields) && rule.fields.length) return rule.fields;
+    return [];
+  }
+
   function normalizeSteps(rule) {
-    if (Array.isArray(rule.steps) && rule.steps.length) {
-      return rule.steps.map(normalizeStep).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const steps = ruleStepSource(rule);
+    if (steps.length) {
+      return steps.map(normalizeStep).sort((a, b) => (a.order || 0) - (b.order || 0));
     }
-    if (rule.selector) {
+    const selector = selectorFromStep(rule);
+    if (selector) {
       return [normalizeStep({
         order: 1,
-        action: "set_value",
-        selector: rule.selector,
-        value: rule.value || "",
+        action: rule.action || rule.type || "set_value",
+        selector,
+        value: valueFromStep(rule),
         fieldKey: rule.fieldKey || rule.name || "",
         label: rule.name || "Field",
         required: false

@@ -268,16 +268,61 @@ function normalizeAutofillSite(rule = {}) {
   };
 }
 
+function normalizeAutofillAction(action) {
+  const raw = String(action || "set_value").toLowerCase();
+  if (["text", "type", "fill", "input"].includes(raw)) return "set_value";
+  if (["check", "uncheck", "checkbox", "radio", "select", "click", "wait", "set_value"].includes(raw)) return raw;
+  return "set_value";
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return "";
+}
+
+function autofillSelectorFromStep(step = {}) {
+  const direct = firstNonEmpty(
+    step.selector,
+    step.target,
+    step.targetSelector,
+    step.target_selector,
+    step.selectorCss,
+    step.selector_css,
+    step.cssSelector,
+    step.css_selector,
+    step.css,
+    step.primary
+  );
+  if (direct) return direct;
+  const xpath = firstNonEmpty(step.xpath, step.x_path);
+  if (xpath) return { strategy: "xpath", primary: xpath, xpath };
+  const id = firstNonEmpty(step.elementId, step.element_id, step.inputId, step.input_id, step.id);
+  if (id) return { strategy: "id", primary: `#${id}`, id, element_id: id };
+  const name = firstNonEmpty(step.inputName, step.input_name, step.nameAttr, step.name_attr, step.selectorName, step.selector_name, step.name);
+  if (name) return { strategy: "name", primary: `[name="${name}"]`, name };
+  return "";
+}
+
+function autofillValueFromStep(step = {}) {
+  return step.value
+    ?? step.text
+    ?? step.fill
+    ?? step.defaultValue
+    ?? step.default_value
+    ?? "";
+}
+
 function normalizeAutofillStep(step = {}, index = 0) {
   const runtime = step.runtime || {};
-  const action = String(step.action || "set_value").toLowerCase();
   return {
     ...step,
     order: Number(step.order || index + 1),
-    action: action === "text" ? "set_value" : action,
-    fieldKey: step.fieldKey || step.field_key || "",
-    selector: step.selector || step.target || "",
-    value: step.value ?? "",
+    action: normalizeAutofillAction(step.action || step.type),
+    fieldKey: step.fieldKey || step.field_key || step.key || step.name || "",
+    selector: autofillSelectorFromStep(step),
+    value: autofillValueFromStep(step),
     required: step.required !== false && runtime.required !== false,
     runtime: {
       ...runtime,
@@ -288,10 +333,33 @@ function normalizeAutofillStep(step = {}, index = 0) {
   };
 }
 
+function rawAutofillSteps(rule = {}) {
+  if (Array.isArray(rule.steps) && rule.steps.length) return rule.steps;
+  if (Array.isArray(rule.actions) && rule.actions.length) return rule.actions;
+  if (Array.isArray(rule.fields) && rule.fields.length) return rule.fields;
+  return [];
+}
+
+function normalizedAutofillSteps(rule = {}) {
+  const steps = rawAutofillSteps(rule);
+  if (steps.length) return steps.map(normalizeAutofillStep);
+  const selector = autofillSelectorFromStep(rule);
+  if (!selector) return [];
+  return [normalizeAutofillStep({
+    order: 1,
+    action: rule.action || rule.type || "set_value",
+    selector,
+    value: autofillValueFromStep(rule),
+    fieldKey: rule.fieldKey || rule.field_key || rule.name || "",
+    required: false
+  })];
+}
+
 function normalizeAutofillRule(rule = {}) {
   const now = Date.now();
   const execution = rule.execution || {};
   const mode = String(rule.ruleType || rule.rule_type || execution.mode || "instant").toLowerCase() === "flow" ? "flow" : "instant";
+  const steps = normalizedAutofillSteps(rule);
   return {
     ...rule,
     id: rule.id || rule.local_rule_id || (crypto.randomUUID ? crypto.randomUUID() : `rule_${now}_${Math.random().toString(36).slice(2)}`),
@@ -307,7 +375,7 @@ function normalizeAutofillRule(rule = {}) {
       runOnce: execution.runOnce ?? execution.run_once ?? true,
       stopOnError: execution.stopOnError ?? execution.stop_on_error ?? mode === "flow"
     },
-    steps: Array.isArray(rule.steps) ? rule.steps.map(normalizeAutofillStep) : [],
+    steps,
     profileId: rule.profileId || rule.profile_id || "default",
     profileIds: Array.isArray(rule.profileIds)
       ? rule.profileIds

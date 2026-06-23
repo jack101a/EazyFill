@@ -26,6 +26,7 @@ function startServer() {
       <html>
         <body>
           <label>Name <input id="name" name="name"></label>
+          <label>Legacy <input id="legacy" name="legacy"></label>
           <canvas id="captchaText" width="120" height="42"></canvas>
           <label>CAPTCHA <input id="captchaAnswer"></label>
           <script>
@@ -69,6 +70,7 @@ try {
 
     function responseFor(message) {
       if (message.type === "GET_EXTENSION_STORAGE") {
+        const host = location.hostname;
         return {
           ok: true,
           data: {
@@ -76,11 +78,54 @@ try {
               extensionEnabled: true,
               captchaEnabled: true,
               autofillEnabled: true,
+              activeProfileId: "default",
               captchaFillDelayMs: 120,
               captchaHumanTyping: true
             },
-            fp_captcha_selectors: { "127.0.0.1": route }
+            fp_captcha_selectors: { "127.0.0.1": route },
+            fp_profiles: [{ id: "default", name: "Global", values: {} }],
+            fp_rules: [{
+              id: "rule-name",
+              name: "Fill test name",
+              enabled: true,
+              site: { matchMode: "domainPath", pattern: `${host}/`, path: "/" },
+              ruleType: "instant",
+              profileId: "default",
+              profileIds: ["default"],
+              execution: { mode: "instant", delayMs: 0, waitTimeoutMs: 1000, runOnce: false },
+              steps: [{
+                order: 1,
+                action: "set_value",
+                selector: "#name",
+                value: "Grace Hopper",
+                required: true
+              }]
+            }, {
+              id: "rule-legacy-action",
+              name: "Fill legacy action",
+              enabled: true,
+              site: { matchMode: "domainPath", pattern: `${host}/`, path: "/" },
+              ruleType: "instant",
+              profileId: "default",
+              profileIds: ["default"],
+              execution: { mode: "instant", delayMs: 0, waitTimeoutMs: 1000, runOnce: false },
+              actions: [{
+                order: 1,
+                type: "fill",
+                target_selector: "#legacy",
+                default_value: "Legacy Value",
+                required: true
+              }]
+            }]
           }
+        };
+      }
+      if (message.type === "GET_RUNTIME_PLAN_LIMITS") {
+        return {
+          ok: true,
+          authenticated: true,
+          features: { autofill: true, userscripts: true },
+          limits: { rules: 20, scripts: 10 }
         };
       }
       if (message.type === "CAPTCHA_SOLVE_REQUEST") {
@@ -128,6 +173,7 @@ try {
   await addContentScript(page, "content/excluded-hosts.js");
   await addContentScript(page, "content/captcha-filler.js");
   await addContentScript(page, "content/captcha-detector.js");
+  await addContentScript(page, "content/autofill-engine.js");
   await addContentScript(page, "content/selector-overlay.js");
   await addContentScript(page, "content/recorder-panel.js");
   await addContentScript(page, "content/recorder-engine.js");
@@ -152,6 +198,16 @@ try {
   const inputEvents = await page.evaluate(() => globalThis.__captchaInputEvents);
   assert.ok(inputEvents.length >= 5, `Expected clear plus typed input events, received ${inputEvents.length}`);
   assert.deepEqual(inputEvents.slice(-4).map((event) => event.value), ["A", "AB", "AB1", "AB12"]);
+
+  await page.locator("#name").fill("");
+  await page.locator("#legacy").fill("");
+  const autofillResult = await page.evaluate(() => globalThis.__dispatchRuntimeMessage({ type: "AUTOFILL_EXECUTE_NOW" }));
+  assert.equal(autofillResult.ok, true);
+  assert.equal(autofillResult.matchedRules, 2);
+  assert.equal(autofillResult.executedRules, 2);
+  assert.equal(autofillResult.succeededSteps, 2);
+  assert.equal(await page.locator("#name").inputValue(), "Grace Hopper");
+  assert.equal(await page.locator("#legacy").inputValue(), "Legacy Value");
 
   const recorderStart = await page.evaluate(() => globalThis.__dispatchRuntimeMessage({ type: "START_RECORDING" }));
   assert.equal(recorderStart.ok, true);
@@ -180,7 +236,7 @@ try {
   assert.equal(picked.targetField, "captcha-source");
   assert.equal(picked.selector.primary, "#captchaText");
 
-  console.log("EAZ content workflows passed: CAPTCHA delay/typing, recorder, and selector picker");
+  console.log("EAZ content workflows passed: CAPTCHA delay/typing, autofill, recorder, and selector picker");
 } finally {
   await browser.close();
   server.close();
