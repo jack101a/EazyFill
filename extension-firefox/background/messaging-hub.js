@@ -479,6 +479,13 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     return response;
   });
 
+  registerMessageHandler("AUTOFILL_AUTO_EXECUTED", async (message) => {
+    if (message.succeededSteps && creditManager?.recordAutofillExecution) {
+      await creditManager.recordAutofillExecution(message.succeededSteps);
+    }
+    return ok();
+  });
+
   registerMessageHandler("SELECTOR_PICKED", async (message) => {
     const targetField = String(message.targetField || "");
     const selected = message.selector?.primary || "";

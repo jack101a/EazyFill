@@ -29,6 +29,9 @@
 
   let running = false;
   let pageKey = "";
+  let autoRunTimer = null;
+  let lastAutoRunAt = 0;
+  let mutationObserver = null;
   const stepCursors = new Map();
   const completedStepKeys = new Set();
 
@@ -320,6 +323,13 @@
   function ruleMatchesActiveProfile(rule, settings = {}) {
     const ids = Array.isArray(rule.profileIds) ? rule.profileIds : [rule.profileId || "default"];
     return ids.map((id) => String(id || "default")).includes(activeProfileId(settings));
+  }
+
+  function isAutomaticSafeRule(rule) {
+    if (!rule || rule.ruleType === "flow" || rule.execution?.mode === "flow") return false;
+    const steps = Array.isArray(rule.steps) ? rule.steps : [];
+    if (!steps.length) return false;
+    return steps.every((step) => normalizeAction(step.action) !== "click");
   }
 
   function resolveValue(step, values) {
@@ -663,7 +673,8 @@
         .filter((rule) => options.ruleId ? true : ruleMatchesActiveProfile(rule, settings))
         .sort((a, b) => (b.priority || 100) - (a.priority || 100));
       const planAllowed = applyRuleRuntimeLimit(matching, await loadRuntimeLimits());
-      const selected = options.ruleId ? planAllowed.filter((rule) => String(rule.id) === String(options.ruleId)) : planAllowed;
+      const allowed = options.automatic ? planAllowed.filter(isAutomaticSafeRule) : planAllowed;
+      const selected = options.ruleId ? allowed.filter((rule) => String(rule.id) === String(options.ruleId)) : allowed;
       if (!selected.length) {
         return {
           ok: true,
@@ -694,6 +705,76 @@
     }
   }
 
+  function reportAutomaticRun(result, reason) {
+    if (!result?.ok || !Number(result.succeededSteps || 0)) return;
+    sendMessage({
+      type: "AUTOFILL_AUTO_EXECUTED",
+      succeededSteps: Number(result.succeededSteps || 0),
+      matchedRules: Number(result.matchedRules || 0),
+      executedRules: Number(result.executedRules || 0),
+      reason,
+      url: location.href
+    }).catch(() => {});
+  }
+
+  async function runAutomaticAutofill(reason = "auto") {
+    if (document.visibilityState === "hidden") return;
+    lastAutoRunAt = Date.now();
+    try {
+      const result = await executeMatchingRules({ automatic: true, mode: "instant" });
+      reportAutomaticRun(result, reason);
+    } catch (_) {
+      // Automatic runs should never disturb the page.
+    }
+  }
+
+  function scheduleAutomaticAutofill(reason = "auto") {
+    if (autoRunTimer) return;
+    const elapsed = Date.now() - lastAutoRunAt;
+    const delayMs = Math.max(350, Math.min(1200, 1200 - elapsed));
+    autoRunTimer = setTimeout(() => {
+      autoRunTimer = null;
+      runAutomaticAutofill(reason);
+    }, delayMs);
+  }
+
+  function patchHistoryMethod(name) {
+    const original = history[name];
+    if (typeof original !== "function" || original.__eazyfillPatched) return;
+    const patched = function (...args) {
+      const result = original.apply(this, args);
+      scheduleAutomaticAutofill("navigation");
+      return result;
+    };
+    patched.__eazyfillPatched = true;
+    history[name] = patched;
+  }
+
+  function startAutomaticAutofill() {
+    scheduleAutomaticAutofill("page-load");
+    window.addEventListener("pageshow", () => scheduleAutomaticAutofill("pageshow"), { passive: true });
+    window.addEventListener("popstate", () => scheduleAutomaticAutofill("navigation"), { passive: true });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleAutomaticAutofill("visible");
+    }, { passive: true });
+    patchHistoryMethod("pushState");
+    patchHistoryMethod("replaceState");
+
+    if (!mutationObserver && document.documentElement) {
+      mutationObserver = new MutationObserver((mutations) => {
+        if (mutations.some((mutation) => mutation.addedNodes?.length || mutation.type === "attributes")) {
+          scheduleAutomaticAutofill("dom-change");
+        }
+      });
+      mutationObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["disabled", "hidden", "aria-hidden"]
+      });
+    }
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== "AUTOFILL_EXECUTE_NOW") return false;
     executeMatchingRules(message)
@@ -701,6 +782,8 @@
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   });
+
+  startAutomaticAutofill();
 
   window.EazyFillAutofillEngine = {
     executeMatchingRules,

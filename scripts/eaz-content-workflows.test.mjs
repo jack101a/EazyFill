@@ -178,6 +178,15 @@ try {
   await addContentScript(page, "content/recorder-panel.js");
   await addContentScript(page, "content/recorder-engine.js");
 
+  await page.waitForFunction(() => (
+    document.querySelector("#name")?.value === "Grace Hopper"
+    && document.querySelector("#legacy")?.value === "Legacy Value"
+  ));
+  await page.waitForFunction(() => globalThis.__sentMessages.some((message) => (
+    message.type === "AUTOFILL_AUTO_EXECUTED"
+    && message.succeededSteps === 2
+  )));
+
   await page.evaluate(() => {
     globalThis.__captchaInputEvents = [];
     const target = document.querySelector("#captchaAnswer");
