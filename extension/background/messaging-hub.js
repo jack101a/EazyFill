@@ -651,7 +651,10 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
   });
 
   registerMessageHandler("GET_RUNTIME_PLAN_LIMITS", async () => {
-    const data = await getRuntimeStorage(["fp_auth"], authManager);
+    const data = await getRuntimeStorage(["fp_auth", "fp_credits"], authManager, {
+      refreshCredits: true,
+      refreshStale: true
+    });
     const auth = data.fp_auth || {};
     const authenticated = isAuthenticatedAuth(auth);
     return ok({
