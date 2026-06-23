@@ -148,9 +148,9 @@ class UsageCycleService:
                 text(
                     "UPDATE usage_cycles SET used_count = used_count + :amount, updated_at = :now "
                     "WHERE id = :cycle_id "
-                    "AND used_count + :amount <= monthly_limit AND blocked_at_limit = 0"
+                    "AND used_count + :amount <= monthly_limit AND blocked_at_limit = :not_blocked"
                 ),
-                {"amount": amount, "now": now, "cycle_id": cycle_id}
+                {"amount": amount, "now": now, "cycle_id": cycle_id, "not_blocked": False}
             )
             session.commit()
             if result.rowcount > 0:
@@ -191,10 +191,16 @@ class UsageCycleService:
                 text(
                     "UPDATE usage_cycles "
                     "SET used_count = CASE WHEN used_count >= :amount THEN used_count - :amount ELSE 0 END, "
-                    "blocked_at_limit = 0, updated_at = :now "
+                    "blocked_at_limit = :not_blocked, updated_at = :now "
                     "WHERE id = :cycle_id AND user_id = :user_id"
                 ),
-                {"amount": amount, "now": now, "cycle_id": int(cycle_id), "user_id": int(user_id)},
+                {
+                    "amount": amount,
+                    "now": now,
+                    "cycle_id": int(cycle_id),
+                    "user_id": int(user_id),
+                    "not_blocked": False,
+                },
             )
             session.commit()
             cycle = session.query(UsageCycle).filter(UsageCycle.id == int(cycle_id)).first()
