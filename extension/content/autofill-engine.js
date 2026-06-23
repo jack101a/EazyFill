@@ -325,13 +325,6 @@
     return ids.map((id) => String(id || "default")).includes(activeProfileId(settings));
   }
 
-  function isAutomaticSafeRule(rule) {
-    if (!rule || rule.ruleType === "flow" || rule.execution?.mode === "flow") return false;
-    const steps = Array.isArray(rule.steps) ? rule.steps : [];
-    if (!steps.length) return false;
-    return steps.every((step) => normalizeAction(step.action) !== "click");
-  }
-
   function resolveValue(step, values) {
     const raw = step.value ?? "";
     if (typeof raw !== "string") return raw;
@@ -673,8 +666,7 @@
         .filter((rule) => options.ruleId ? true : ruleMatchesActiveProfile(rule, settings))
         .sort((a, b) => (b.priority || 100) - (a.priority || 100));
       const planAllowed = applyRuleRuntimeLimit(matching, await loadRuntimeLimits());
-      const allowed = options.automatic ? planAllowed.filter(isAutomaticSafeRule) : planAllowed;
-      const selected = options.ruleId ? allowed.filter((rule) => String(rule.id) === String(options.ruleId)) : allowed;
+      const selected = options.ruleId ? planAllowed.filter((rule) => String(rule.id) === String(options.ruleId)) : planAllowed;
       if (!selected.length) {
         return {
           ok: true,
@@ -721,7 +713,7 @@
     if (document.visibilityState === "hidden") return;
     lastAutoRunAt = Date.now();
     try {
-      const result = await executeMatchingRules({ automatic: true, mode: "instant" });
+      const result = await executeMatchingRules({ automatic: true });
       reportAutomaticRun(result, reason);
     } catch (_) {
       // Automatic runs should never disturb the page.
