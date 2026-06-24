@@ -26,6 +26,11 @@ const AUTO_SYNC_KEYS = new Set([
 let autoSyncTimer = null;
 let autoSyncRunning = false;
 const LEGACY_API_BASE_URL = "https://eazyfill.app";
+const DEFAULT_CAPTCHA_BEHAVIOR = {
+  captchaFillDelayMs: 200,
+  captchaHumanTyping: true,
+  captchaLearningConsent: true
+};
 
 function planAllowsSync(plan) {
   if (!plan || typeof plan !== "object") return false;
@@ -111,10 +116,21 @@ async function ensureDefaults() {
   }
   const settings = existing.fp_settings || {};
   const storedApiBase = String(settings.apiBaseUrl || "").replace(/\/+$/, "");
+  const nextSettings = { ...settings };
+  let shouldUpdateSettings = false;
+  for (const [key, value] of Object.entries(DEFAULT_CAPTCHA_BEHAVIOR)) {
+    if (!Object.prototype.hasOwnProperty.call(nextSettings, key)) {
+      nextSettings[key] = value;
+      shouldUpdateSettings = true;
+    }
+  }
   if (!storedApiBase || storedApiBase === LEGACY_API_BASE_URL) {
+    nextSettings.apiBaseUrl = DEFAULT_API_BASE_URL;
+    shouldUpdateSettings = true;
+  }
+  if (shouldUpdateSettings) {
     updates.fp_settings = {
-      ...settings,
-      apiBaseUrl: DEFAULT_API_BASE_URL
+      ...nextSettings
     };
   }
   const keys = Object.keys(updates);

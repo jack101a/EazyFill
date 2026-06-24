@@ -20,6 +20,9 @@ assert.ok(extensionManifest.content_scripts.some((script) => (
 const serviceWorkerSource = fs.readFileSync(path.join(extensionRoot, "background", "service-worker.js"), "utf8");
 assert.match(serviceWorkerSource, /installUserscriptNavigationHandler\(\);/);
 assert.match(serviceWorkerSource, /installUserScript=/);
+assert.match(serviceWorkerSource, /captchaFillDelayMs:\s*200/);
+assert.match(serviceWorkerSource, /captchaHumanTyping:\s*true/);
+assert.match(serviceWorkerSource, /captchaLearningConsent:\s*true/);
 const popupHtml = fs.readFileSync(path.join(extensionRoot, "popup", "popup.html"), "utf8");
 assert.match(popupHtml, /<html[^>]+data-theme="light"/);
 assert.match(popupHtml, /id="brand-logo"[^>]+src="\.\.\/brand\/logo-dark\.png"/);
