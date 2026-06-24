@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "EazyFill",
   "version": "1.0.0",
+  "minimum_chrome_version": "120",
   "default_locale": "en",
   "description": "CAPTCHA solving, form autofill, and userscript tools for browser productivity",
   "permissions": [
@@ -19,8 +20,6 @@
     "clipboardWrite"
   ],
   "host_permissions": [
-    "http://127.0.0.1/*",
-    "http://localhost/*",
     "https://*/*",
     "http://*/*"
   ],
