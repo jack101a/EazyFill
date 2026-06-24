@@ -11,10 +11,10 @@ async function getDeviceId() {
   return deviceId;
 }
 
-function requireAuth(auth) {
-  const authSecret = String(auth?.sessionToken || auth?.apiKey || "").trim();
-  if (!authSecret) throw new Error("Connect EazyFill before syncing");
-  return authSecret;
+function requireSession(auth) {
+  const sessionToken = String(auth?.sessionToken || auth?.session_token || "").trim();
+  if (!sessionToken) throw new Error("Connect EazyFill before syncing");
+  return sessionToken;
 }
 
 function requireSyncSecret(auth) {
@@ -35,7 +35,7 @@ function scrubSettings(settings = {}) {
 export function createSyncManager({ apiClient }) {
   async function buildEncryptedUpload() {
     const data = await getExtensionStorage(["fp_auth", ...SYNC_KEYS]);
-    const apiKey = requireAuth(data.fp_auth);
+    const sessionToken = requireSession(data.fp_auth);
     const syncSecret = requireSyncSecret(data.fp_auth);
     const deviceId = await getDeviceId();
     const syncVersion = nextVersion(data.fp_sync_meta);
@@ -49,7 +49,7 @@ export function createSyncManager({ apiClient }) {
       settings: scrubSettings(data.fp_settings || {}),
       syncVersion
     };
-    const envelope = await encryptSyncPayload(payload, { apiKey, syncSecret, deviceId });
+    const envelope = await encryptSyncPayload(payload, { sessionToken, syncSecret, deviceId });
     const encryptedBlob = jsonToBase64(envelope);
     return {
       deviceId,
@@ -80,14 +80,19 @@ export function createSyncManager({ apiClient }) {
 
   async function pull() {
     const data = await getExtensionStorage(["fp_auth"]);
-    const apiKey = requireAuth(data.fp_auth);
+    const sessionToken = requireSession(data.fp_auth);
     const syncSecret = requireSyncSecret(data.fp_auth);
     const deviceId = await getDeviceId();
     const response = await apiClient.get("/v2/sync/pull");
     if (!response.found) return { ok: true, found: false };
 
     const envelope = jsonFromBase64(response.encrypted_blob);
-    const payload = await decryptSyncPayload(envelope, { apiKey, syncSecret, deviceId });
+    const payload = await decryptSyncPayload(envelope, {
+      sessionToken,
+      legacyApiKey: String(data.fp_auth?.apiKey || "").trim(),
+      syncSecret,
+      deviceId
+    });
     const updates = {
       fp_rules: Array.isArray(payload.rules) ? payload.rules : [],
       fp_scripts: Array.isArray(payload.scripts) ? payload.scripts : [],

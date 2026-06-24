@@ -94,6 +94,20 @@ const script = await manager.normalizeUserscript(rawCode, { id: "security-test",
 await chrome.storage.local.set({ fp_settings: { userscriptsEnabled: true } });
 await protectedStorage.setProtectedValues({ fp_scripts: [script] });
 
+const signedOutRegistration = await manager.registerStoredUserscripts();
+assert.equal(signedOutRegistration.count, 0);
+assert.equal(signedOutRegistration.authRequired, true);
+
+await protectedStorage.setProtectedValues({
+  fp_auth: {
+    sessionToken: "efs_security_test",
+    valid: true,
+    plan: {
+      features: { userscripts: true },
+      limits: { scripts: 5 }
+    }
+  }
+});
 const registrationResult = await manager.registerStoredUserscripts();
 assert.equal(registrationResult.count, 1);
 assert.deepEqual(worldConfiguration, { messaging: true });

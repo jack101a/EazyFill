@@ -6,6 +6,7 @@
     "build:codemirror": "node cm6_build.js",
     "test:security": "node scripts/eaz-sec-001.test.mjs",
     "test:extension": "node scripts/eaz-ext-002.test.mjs && node scripts/eaz-sync-crypto.test.mjs && node scripts/eaz-content-workflows.test.mjs",
+    "test:extension-parity": "node scripts/check-extension-parity.mjs",
     "test:ui": "node scripts/eaz-ui-001.test.mjs",
     "test:e2e:extension": "node scripts/eazyfill_extension_qa.cjs",
     "test:backup-privacy": "node scripts/eazyfill_backup_privacy_check.cjs"

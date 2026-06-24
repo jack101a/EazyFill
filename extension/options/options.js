@@ -1,3 +1,8 @@
+import {
+  authEmailValidationMessage,
+  DEFAULT_API_BASE_URL,
+  normalizeAuthEmail
+} from "../lib/app-config.js";
 const STORAGE_KEYS = ["fp_auth", "fp_settings", "fp_credits", "fp_rules", "fp_scripts", "fp_profiles", "fp_captcha_selectors", "fp_sync_meta"];
 const DEFAULT_PROFILE_ID = "default";
 const CAPTCHA_ROUTE_SUBMIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -15,7 +20,7 @@ const DEFAULT_SETTINGS = {
   userscriptsEnabled: true,
   syncEnabled: false,
   theme: "light",
-  apiBaseUrl: "https://eazyfill.app"
+  apiBaseUrl: DEFAULT_API_BASE_URL
 };
 
 const state = {
@@ -280,7 +285,7 @@ function currentPlanCode() {
 }
 
 function isAuthenticated(auth = state.auth) {
-  return !!String(auth.sessionToken || auth.apiKey || "").trim() && auth.valid !== false;
+  return !!String(auth.sessionToken || "").trim() && auth.valid !== false;
 }
 
 function availablePaymentProvider(code) {
@@ -4209,15 +4214,16 @@ function setOptionsAuthStep(step) {
 
 async function optionsSendOtp() {
   const name = optionsAuthStep === "name" ? ($("options-signup-name")?.value.trim() || "") : "";
-  const identifier = $("options-signup-identifier")?.value.trim() || "";
+  const identifier = normalizeAuthEmail($("options-signup-identifier")?.value || "");
   const messageNode = $("options-signup-message");
   if (!identifier) {
     setInlineMessage(messageNode, "Enter your email.", "error");
     $("options-signup-identifier")?.focus();
     return;
   }
-  if (!identifier.includes("@")) {
-    setInlineMessage(messageNode, "Enter a valid email address.", "error");
+  const validationMessage = authEmailValidationMessage(identifier);
+  if (validationMessage) {
+    setInlineMessage(messageNode, validationMessage, "error");
     $("options-signup-identifier")?.focus();
     return;
   }

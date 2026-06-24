@@ -53,6 +53,7 @@ jobs:
 
       - name: Check extension scripts
         run: |
+          npm run test:extension-parity
           node --check extension/background/service-worker.js
           node --check extension/popup/popup.js
           node --check extension/options/options.js

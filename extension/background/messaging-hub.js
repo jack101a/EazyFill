@@ -393,7 +393,7 @@ function isExtensionEnabled(settings = {}) {
 }
 
 function isAuthenticatedAuth(auth = {}) {
-  return !!String(auth.sessionToken || auth.session_token || auth.apiKey || auth.api_key || "").trim()
+  return !!String(auth.sessionToken || auth.session_token || "").trim()
     && auth.valid !== false;
 }
 
@@ -597,7 +597,8 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     const response = await sendTabMessage(tab.id, {
       type: "AUTOFILL_EXECUTE_NOW",
       mode: message.mode || message.executionMode || null,
-      ruleId: message.ruleId || null
+      ruleId: message.ruleId || null,
+      force: true
     });
     if (response.ok && response.succeededSteps && creditManager?.recordAutofillExecution) {
       await creditManager.recordAutofillExecution(response.succeededSteps);
@@ -749,7 +750,6 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     registerMessageHandler("AUTH_STATUS_CHECK", () => authManager.getAuthStatus());
     registerMessageHandler("REGISTER_ACCOUNT", (message) => authManager.registerAccount(message.payload || message));
     registerMessageHandler("VERIFY_OTP", (message) => authManager.verifyOtp(message.payload || message));
-    registerMessageHandler("SAVE_API_KEY", (message) => authManager.saveApiKey(message.apiKey, message.options || {}));
     registerMessageHandler("LOGOUT", () => authManager.logout());
   }
 

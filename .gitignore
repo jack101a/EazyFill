@@ -15,6 +15,8 @@ lib/
 lib64/
 !extension/lib/
 !extension/lib/**
+!extension-firefox/lib/
+!extension-firefox/lib/**
 parts/
 sdist/
 var/

@@ -1,5 +1,11 @@
 "use strict";
 
+import {
+  authEmailValidationMessage,
+  DEFAULT_API_BASE_URL,
+  normalizeAuthEmail
+} from "../lib/app-config.js";
+
 const DEFAULT_SETTINGS = {
   extensionEnabled: true,
   activeProfileId: "default",
@@ -10,7 +16,7 @@ const DEFAULT_SETTINGS = {
   autofillEnabled: true,
   userscriptsEnabled: true,
   syncEnabled: false,
-  apiBaseUrl: "https://eazyfill.app",
+  apiBaseUrl: DEFAULT_API_BASE_URL,
   theme: "light",
   seenWelcome: false
 };
@@ -31,59 +37,6 @@ const BUTTON_LABELS = {
   "popup-send-otp": "Continue",
   "popup-verify-otp": "Verify"
 };
-
-const SUPPORTED_AUTH_EMAIL_DOMAINS = new Set([
-  "gmail.com",
-  "googlemail.com",
-  "hotmail.com",
-  "outlook.com",
-  "live.com",
-  "msn.com",
-  "proton.me",
-  "protonmail.com",
-  "pm.me",
-  "rediffmail.com",
-  "rediff.com",
-  "yahoo.com",
-  "ymail.com",
-  "rocketmail.com",
-  "icloud.com",
-  "me.com",
-  "mac.com",
-  "aol.com",
-  "zoho.com",
-  "zohomail.com",
-  "fastmail.com",
-  "hey.com",
-  "mail.com",
-  "gmx.com",
-  "gmx.net",
-  "tutanota.com",
-  "tuta.io"
-]);
-
-const BLOCKED_AUTH_EMAIL_DOMAINS = new Set([
-  "10minutemail.com",
-  "20minutemail.com",
-  "anonaddy.com",
-  "dispostable.com",
-  "emailondeck.com",
-  "fakeinbox.com",
-  "getnada.com",
-  "guerrillamail.com",
-  "grr.la",
-  "maildrop.cc",
-  "mailinator.com",
-  "mintemail.com",
-  "moakt.com",
-  "mytemp.email",
-  "sharklasers.com",
-  "temp-mail.org",
-  "tempmail.com",
-  "throwawaymail.com",
-  "trashmail.com",
-  "yopmail.com"
-]);
 
 function $(id) {
   return document.getElementById(id);
@@ -305,27 +258,6 @@ function setPopupAuthVisible(visible) {
       focusTarget?.focus();
     });
   }
-}
-
-function cleanAuthEmail(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function authEmailDomain(email) {
-  const clean = cleanAuthEmail(email);
-  const atIndex = clean.lastIndexOf("@");
-  if (atIndex <= 0 || atIndex === clean.length - 1) return "";
-  return clean.slice(atIndex + 1).replace(/\.+$/, "");
-}
-
-function authEmailValidationMessage(email) {
-  const domain = authEmailDomain(email);
-  if (!domain) return "Enter a valid email address.";
-  if (BLOCKED_AUTH_EMAIL_DOMAINS.has(domain)) return "Temporary email addresses are not supported.";
-  if (!SUPPORTED_AUTH_EMAIL_DOMAINS.has(domain)) {
-    return "Use Gmail, Outlook, Hotmail, Proton Mail, Rediffmail, Yahoo, iCloud, Zoho, Fastmail, or another supported provider.";
-  }
-  return "";
 }
 
 function setLoading(button, loading, label) {
@@ -573,7 +505,7 @@ async function refreshStatus() {
 }
 
 async function sendPopupOtp() {
-  const email = cleanAuthEmail($("popup-auth-email")?.value || "");
+  const email = normalizeAuthEmail($("popup-auth-email")?.value || "");
   const name = state.authStep === "name" ? ($("popup-auth-name")?.value.trim() || "") : "";
   const validationMessage = authEmailValidationMessage(email);
   if (validationMessage) {

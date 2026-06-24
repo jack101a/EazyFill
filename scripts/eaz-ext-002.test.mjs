@@ -81,7 +81,7 @@ function send(message, sender) {
 let response = await send({
   type: "SET_EXTENSION_STORAGE",
   values: {
-    fp_auth: { apiKey: "fp_test_secret" },
+    fp_auth: { sessionToken: "efs_test_session", valid: true },
     fp_settings: { autofillEnabled: true },
     fp_rules: [{ id: "rule-1" }],
     fp_profiles: [{ id: "default", values: { fullName: "Ada Lovelace" } }]
@@ -94,7 +94,7 @@ response = await send({
   keys: ["fp_auth", "fp_settings", "fp_rules", "fp_profiles"]
 }, optionsSender);
 assert.equal(response.ok, true);
-assert.equal(response.data.fp_auth.apiKey, "fp_test_secret");
+assert.equal(response.data.fp_auth.sessionToken, "efs_test_session");
 
 const apiClientUrl = pathToFileURL(path.join(root, "extension/background/api-client.js"));
 const { createApiClient } = await import(apiClientUrl);
@@ -110,8 +110,10 @@ globalThis.fetch = async (url, init = {}) => {
 try {
   const apiClient = createApiClient({ baseUrl: "https://api.test" });
   await apiClient.post("/v2/protected", {}, { retry: false });
-  await apiClient.post("/v2/auth/register", {}, { retry: false, skipAuth: true });
-  assert.equal(capturedRequests[0].init.headers["X-Api-Key"], "fp_test_secret");
+  await apiClient.post("/v2/account/start", {}, { retry: false, skipAuth: true });
+  assert.equal(capturedRequests[0].init.headers["X-EazyFill-Session"], "efs_test_session");
+  assert.equal(capturedRequests[0].init.headers["X-Api-Key"], undefined);
+  assert.equal(capturedRequests[1].init.headers["X-EazyFill-Session"], undefined);
   assert.equal(capturedRequests[1].init.headers["X-Api-Key"], undefined);
   assert.ok(capturedRequests[1].init.headers["X-EazyFill-Device-Id"]);
 } finally {

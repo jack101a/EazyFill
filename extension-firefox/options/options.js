@@ -1,3 +1,8 @@
+import {
+  authEmailValidationMessage,
+  DEFAULT_API_BASE_URL,
+  normalizeAuthEmail
+} from "../lib/app-config.js";
 const STORAGE_KEYS = ["fp_auth", "fp_settings", "fp_credits", "fp_rules", "fp_scripts", "fp_profiles", "fp_captcha_selectors", "fp_sync_meta"];
 const DEFAULT_PROFILE_ID = "default";
 const CAPTCHA_ROUTE_SUBMIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -15,7 +20,7 @@ const DEFAULT_SETTINGS = {
   userscriptsEnabled: true,
   syncEnabled: false,
   theme: "light",
-  apiBaseUrl: "https://eazyfill.app"
+  apiBaseUrl: DEFAULT_API_BASE_URL
 };
 
 const state = {
@@ -280,7 +285,7 @@ function currentPlanCode() {
 }
 
 function isAuthenticated(auth = state.auth) {
-  return !!String(auth.sessionToken || auth.apiKey || "").trim() && auth.valid !== false;
+  return !!String(auth.sessionToken || "").trim() && auth.valid !== false;
 }
 
 function availablePaymentProvider(code) {
@@ -298,6 +303,24 @@ function preferredBillingProvider(item = {}) {
 function billingProviderLabel(code) {
   const provider = state.paymentProviders.find((item) => String(item.code || "").toLowerCase() === code);
   return provider?.name || (code === "razorpay" ? "Razorpay" : code);
+}
+
+function openExternalBillingUrl(url) {
+  const target = String(url || "").trim();
+  if (!target) return false;
+  try {
+    if (globalThis.chrome?.tabs?.create) {
+      chrome.tabs.create({ url: target });
+      return true;
+    }
+  } catch (_) {
+    // Fall through to window.open for browsers that do not expose tabs here.
+  }
+  try {
+    return Boolean(window.open(target, "_blank", "noopener,noreferrer"));
+  } catch (_) {
+    return false;
+  }
 }
 
 function planAllowsSync(plan) {
@@ -318,12 +341,26 @@ function planFeatureValue(plan, key) {
   return undefined;
 }
 
+function featureEnabled(plan, key, fallback = false) {
+  const value = planFeatureValue(plan, key);
+  if (value === undefined) return fallback;
+  return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true";
+}
+
+function hasRuntimePlanData(plan) {
+  if (!plan || typeof plan !== "object") return false;
+  const features = plan.features && typeof plan.features === "object" ? plan.features : {};
+  const services = plan.allowed_services && typeof plan.allowed_services === "object" ? plan.allowed_services : {};
+  const limits = plan.limits && typeof plan.limits === "object" ? plan.limits : {};
+  return Object.keys(features).length > 0 || Object.keys(services).length > 0 || Object.keys(limits).length > 0;
+}
+
 function planAllowsPortablePack(action, plan = state.auth.plan) {
   const specific = action === "import" ? "local_backup_import" : "local_backup_export";
   const specificValue = planFeatureValue(plan, specific);
-  if (specificValue !== undefined) return specificValue === true;
+  if (specificValue !== undefined) return featureEnabled(plan, specific);
   const portableValue = planFeatureValue(plan, "portable_pack");
-  if (portableValue !== undefined) return portableValue === true;
+  if (portableValue !== undefined) return featureEnabled(plan, "portable_pack");
   return false;
 }
 
@@ -333,6 +370,72 @@ function requirePortablePackAccess(action) {
   if (!planAllowsPortablePack(action)) {
     throw new Error("Import/export is not enabled for this plan");
   }
+}
+
+function planLimitValue(plan, key) {
+  if (!plan || typeof plan !== "object") return undefined;
+  if (plan.limits && Object.prototype.hasOwnProperty.call(plan.limits, key)) return plan.limits[key];
+  const serviceKey = `${key}_limit`;
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, serviceKey)) {
+    return plan.allowed_services[serviceKey];
+  }
+  return undefined;
+}
+
+function numericAutomationLimit(raw) {
+  if (raw === undefined || raw === null || raw === "") return Infinity;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : Infinity;
+}
+
+function allowedRuleLimitForCurrentPlan() {
+  if (!isAuthenticated()) return 0;
+  const plan = state.auth.plan || {};
+  if (!hasRuntimePlanData(plan) || !featureEnabled(plan, "autofill", false)) return 0;
+  if (featureEnabled(plan, "unlimited_rules", false)) return Infinity;
+  return numericAutomationLimit(planLimitValue(plan, "rules"));
+}
+
+function allowedScriptLimitForCurrentPlan() {
+  if (!isAuthenticated()) return 0;
+  const plan = state.auth.plan || {};
+  if (!hasRuntimePlanData(plan) || !featureEnabled(plan, "userscripts", false)) return 0;
+  return numericAutomationLimit(planLimitValue(plan, "scripts"));
+}
+
+function allowedActiveItemIds(items, limit) {
+  const enabledItems = normalizeArray(items)
+    .filter((item) => itemMatchesActiveProfile(item) && item.enabled !== false);
+  const allowedItems = limit === Infinity ? enabledItems : enabledItems.slice(0, Math.max(0, Number(limit || 0)));
+  return new Set(allowedItems.map((item) => String(item.id || "")));
+}
+
+function runtimeStateForAutomation(item, type, allowedIds) {
+  if (!isAuthenticated()) {
+    return { label: "Sign in required", tone: "warning", detail: "Saved locally" };
+  }
+  if (state.settings.extensionEnabled === false) {
+    return { label: "Extension off", tone: "muted", detail: "Saved locally" };
+  }
+  if (type === "rule" && !featureEnabled(state.auth.plan || {}, "autofill", false)) {
+    return { label: "Plan locked", tone: "warning", detail: "Upgrade to run" };
+  }
+  if (type === "script" && !featureEnabled(state.auth.plan || {}, "userscripts", false)) {
+    return { label: "Plan locked", tone: "warning", detail: "Upgrade to run" };
+  }
+  if (type === "rule" && state.settings.autofillEnabled === false) {
+    return { label: "Autofill paused", tone: "muted", detail: "Saved locally" };
+  }
+  if (type === "script" && state.settings.userscriptsEnabled === false) {
+    return { label: "Scripts paused", tone: "muted", detail: "Saved locally" };
+  }
+  if (item?.enabled === false) {
+    return { label: "Disabled", tone: "danger", detail: "Will not run" };
+  }
+  if (!allowedIds.has(String(item?.id || ""))) {
+    return { label: "Plan limit", tone: "warning", detail: "Saved but not active" };
+  }
+  return { label: "Ready", tone: "success", detail: "Runs when site matches" };
 }
 
 function createEmptyCard(message) {
@@ -1094,11 +1197,12 @@ function renderRules() {
     return;
   }
 
+  const allowedRuleIds = allowedActiveItemIds(state.rules, allowedRuleLimitForCurrentPlan());
   for (const rule of visibleRules) {
     const name = rule.name || "Untitled Rule";
     const sitePattern = ruleSitePattern(rule);
     const steps = ruleStepCount(rule);
-    const statusLabel = ruleStatusLabel(rule);
+    const runtime = runtimeStateForAutomation(rule, "rule", allowedRuleIds);
     if (tbody) {
       const row = document.createElement("tr");
       row.dataset.id = rule.id;
@@ -1130,8 +1234,8 @@ function renderRules() {
       siteCell.append(node("div", "admin-secondary", ruleAccessSummary(rule)));
 
       const statusCell = document.createElement("td");
-      statusCell.append(chip(statusLabel, rule.enabled === false ? "danger" : "success"));
-      statusCell.append(node("div", "admin-secondary", `${steps} step${steps === 1 ? "" : "s"}`));
+      statusCell.append(chip(runtime.label, runtime.tone));
+      statusCell.append(node("div", "admin-secondary", `${runtime.detail} | ${steps} step${steps === 1 ? "" : "s"}`));
 
       const selectorCell = document.createElement("td");
       selectorCell.className = "selector-cell";
@@ -1384,11 +1488,13 @@ function renderScripts() {
     renderUserscriptStatus();
     return;
   }
+  const allowedScriptIds = allowedActiveItemIds(state.scripts, allowedScriptLimitForCurrentPlan());
   for (const script of visibleScripts) {
     const meta = scriptMeta(script);
     const name = meta.name || cleanScriptTitle(script.name) || "Untitled Script";
     const version = script.version || meta.version || "1.0.0";
     const remote = isRemoteUserscript(script);
+    const runtime = runtimeStateForAutomation(script, "script", allowedScriptIds);
     const row = document.createElement("tr");
     row.dataset.id = script.id;
     row.classList.toggle("selected", script.id === state.selectedScriptId);
@@ -1421,7 +1527,8 @@ function renderScripts() {
     nameText.append(nameNode);
     nameWrap.append(nameText);
     nameCell.append(nameWrap);
-    if (script.enabled === false) nameCell.append(chip("Disabled", "danger"));
+    nameCell.append(chip(runtime.label, runtime.tone));
+    nameCell.append(node("div", "admin-secondary", runtime.detail));
 
     const versionCell = document.createElement("td");
     versionCell.append(node("div", "admin-primary", version));
@@ -1501,6 +1608,11 @@ function renderUserscriptStatus() {
     return;
   }
   const count = status.registeredCount ?? status.count ?? 0;
+  if (status.authRequired) {
+    node.dataset.tone = "warning";
+    node.textContent = "Sign in to activate saved EazyFill userscripts.";
+    return;
+  }
   if (status.available || status.ok) {
     node.dataset.tone = "success";
     node.textContent = `Chrome userScripts runtime ready. ${count} script${count === 1 ? "" : "s"} registered.`;
@@ -3695,7 +3807,14 @@ async function createBillingOrder(plan) {
   if (!response.ok) throw new Error(response.error || "Order creation failed");
   if (provider === "razorpay") {
     const orderId = response.order?.id || response.payment?.provider_order_id || "";
-    toast(orderId ? `Razorpay order created: ${orderId}` : "Razorpay order created", "success");
+    const checkoutUrl = response.checkout_url || response.checkoutUrl || response.order?.checkout_url || "";
+    if (checkoutUrl && openExternalBillingUrl(checkoutUrl)) {
+      toast("Razorpay checkout opened", "success");
+    } else if (checkoutUrl) {
+      toast("Order created. Allow popups to open Razorpay checkout.", "warning");
+    } else {
+      toast(orderId ? `Razorpay order created: ${orderId}` : "Razorpay order created", "success");
+    }
   }
   await loadBillingData();
 }
@@ -4095,15 +4214,16 @@ function setOptionsAuthStep(step) {
 
 async function optionsSendOtp() {
   const name = optionsAuthStep === "name" ? ($("options-signup-name")?.value.trim() || "") : "";
-  const identifier = $("options-signup-identifier")?.value.trim() || "";
+  const identifier = normalizeAuthEmail($("options-signup-identifier")?.value || "");
   const messageNode = $("options-signup-message");
   if (!identifier) {
     setInlineMessage(messageNode, "Enter your email.", "error");
     $("options-signup-identifier")?.focus();
     return;
   }
-  if (!identifier.includes("@")) {
-    setInlineMessage(messageNode, "Enter a valid email address.", "error");
+  const validationMessage = authEmailValidationMessage(identifier);
+  if (validationMessage) {
+    setInlineMessage(messageNode, validationMessage, "error");
     $("options-signup-identifier")?.focus();
     return;
   }

@@ -6,6 +6,7 @@ import { createCreditManager } from "./credit-manager.js";
 import { createSyncManager } from "./sync-manager.js";
 import { installMessageHub, registerCoreMessageHandlers } from "./messaging-hub.js";
 import { registerStoredUserscripts } from "./userscript-manager.js";
+import { DEFAULT_API_BASE_URL } from "../lib/app-config.js";
 
 const apiClient = createApiClient();
 const authManager = createAuthManager({ apiClient });
@@ -24,6 +25,7 @@ const AUTO_SYNC_KEYS = new Set([
 ]);
 let autoSyncTimer = null;
 let autoSyncRunning = false;
+const LEGACY_API_BASE_URL = "https://eazyfill.app";
 
 function planAllowsSync(plan) {
   if (!plan || typeof plan !== "object") return false;
@@ -40,7 +42,7 @@ async function autoSyncEligible() {
   const data = await getExtensionStorage(["fp_auth", "fp_settings"]);
   const auth = data.fp_auth || {};
   const settings = data.fp_settings || {};
-  return !!String(auth.sessionToken || auth.apiKey || "").trim()
+  return !!String(auth.sessionToken || "").trim()
     && auth.valid !== false
     && settings.syncEnabled === true
     && planAllowsSync(auth.plan);
@@ -95,7 +97,7 @@ function installUserscriptNavigationHandler() {
 }
 
 async function ensureDefaults() {
-  const existing = await chrome.storage.local.get(["fp_credits"]);
+  const existing = await getExtensionStorage(["fp_credits", "fp_settings"]);
   const updates = {};
   if (!existing.fp_credits) {
     updates.fp_credits = {
@@ -105,6 +107,14 @@ async function ensureDefaults() {
         remaining: 20,
         resetsAt: null
       }
+    };
+  }
+  const settings = existing.fp_settings || {};
+  const storedApiBase = String(settings.apiBaseUrl || "").replace(/\/+$/, "");
+  if (!storedApiBase || storedApiBase === LEGACY_API_BASE_URL) {
+    updates.fp_settings = {
+      ...settings,
+      apiBaseUrl: DEFAULT_API_BASE_URL
     };
   }
   const keys = Object.keys(updates);
@@ -175,7 +185,11 @@ chrome.commands.onCommand.addListener(async (command) => {
     if (command === "start-recording") {
       await sendTabMessage(tab.id, { type: "START_RECORDING" });
     } else if (command === "fill-autofill") {
-      const response = await sendTabMessage(tab.id, { type: "AUTOFILL_EXECUTE_NOW", mode: "instant" });
+      const response = await sendTabMessage(tab.id, {
+        type: "AUTOFILL_EXECUTE_NOW",
+        mode: "instant",
+        force: true
+      });
       if (response?.ok && response?.succeededSteps && creditManager?.recordAutofillExecution) {
         creditManager.recordAutofillExecution(response.succeededSteps);
       }

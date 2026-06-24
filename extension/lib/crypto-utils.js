@@ -24,9 +24,9 @@ function randomBase64(length) {
   return bytesToBase64(bytes);
 }
 
-async function deriveSyncKey({ apiKey, syncSecret, deviceId, salt, scope = "user", secretMaterial = "" }) {
+async function deriveSyncKey({ sessionToken, legacyApiKey, syncSecret, deviceId, salt, scope = "user", secretMaterial = "" }) {
   const userMaterial = String(secretMaterial || syncSecret || "");
-  const deviceMaterial = `${apiKey}\n${deviceId || ""}`;
+  const deviceMaterial = `${legacyApiKey || sessionToken || ""}\n${deviceId || ""}`;
   if (scope !== "device" && !userMaterial) {
     throw new Error("Sync secret is required");
   }
@@ -51,14 +51,14 @@ async function deriveSyncKey({ apiKey, syncSecret, deviceId, salt, scope = "user
   );
 }
 
-export async function encryptSyncPayload(payload, { apiKey, syncSecret, deviceId }) {
+export async function encryptSyncPayload(payload, { sessionToken, syncSecret, deviceId }) {
   if (!String(syncSecret || "").trim()) {
     throw new Error("Sync secret is required");
   }
   const salt = randomBase64(16);
   const ivBytes = new Uint8Array(12);
   crypto.getRandomValues(ivBytes);
-  const key = await deriveSyncKey({ apiKey, syncSecret, deviceId, salt, scope: "user" });
+  const key = await deriveSyncKey({ sessionToken, syncSecret, deviceId, salt, scope: "user" });
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBytes }, key, plaintext);
   return {
@@ -74,17 +74,17 @@ function uniqueMaterials(values) {
   return Array.from(new Set(values.map((value) => String(value || "")).filter(Boolean)));
 }
 
-export async function decryptSyncPayload(envelope, { apiKey, syncSecret, deviceId }) {
+export async function decryptSyncPayload(envelope, { sessionToken, legacyApiKey, syncSecret, deviceId }) {
   if (!envelope || !envelope.salt || !envelope.iv || !envelope.ciphertext) {
     throw new Error("Unsupported sync blob");
   }
   const candidates = [];
   if (envelope.v === 2 && envelope.alg === "AES-GCM-HKDF-SHA256-USER") {
-    for (const material of uniqueMaterials([syncSecret, apiKey])) {
+    for (const material of uniqueMaterials([syncSecret, legacyApiKey])) {
       candidates.push({ scope: "user", secretMaterial: material });
     }
   } else if (envelope.v === 1 && envelope.alg === "AES-GCM-HKDF-SHA256") {
-    for (const material of uniqueMaterials([syncSecret, apiKey])) {
+    for (const material of uniqueMaterials([syncSecret, legacyApiKey])) {
       candidates.push({ scope: "user", secretMaterial: material });
     }
     candidates.push({ scope: "device", secretMaterial: "" });
@@ -96,7 +96,8 @@ export async function decryptSyncPayload(envelope, { apiKey, syncSecret, deviceI
   for (const candidate of candidates) {
     try {
       const key = await deriveSyncKey({
-        apiKey,
+        sessionToken,
+        legacyApiKey,
         syncSecret,
         deviceId,
         salt: envelope.salt,

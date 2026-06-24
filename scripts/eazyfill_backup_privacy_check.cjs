@@ -66,6 +66,16 @@ function sendRuntime(page, message) {
       type: "SET_EXTENSION_STORAGE",
       values: {
         fp_settings: { extensionEnabled: true, theme: "dark" },
+        fp_auth: {
+          sessionToken: "efs_backup_test",
+          valid: true,
+          plan: {
+            features: {
+              local_backup_export: true,
+              local_backup_import: true
+            }
+          }
+        },
         fp_rules: [{
           id: "rule_secret",
           name: "Secret Rule",
@@ -84,6 +94,10 @@ function sendRuntime(page, message) {
     });
 
     await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#backup-export-btn");
+      return button && button.disabled === false;
+    }, null, { timeout: 10000 });
     await page.click('[data-panel="rules-panel"]');
     const rulesText = await page.locator("#rules-panel").innerText();
     await page.click('[data-panel="scripts-panel"]');
@@ -109,25 +123,46 @@ function sendRuntime(page, message) {
     await download.saveAs(savePath);
     const backupText = fs.readFileSync(savePath, "utf8");
 
-    if (!backupText.startsWith("EAZYFILL_EXTENSION_BACKUP\n")) {
+    if (!backupText.startsWith("EAZYFILL-PACK-V1\n")) {
       throw new Error("Backup missing EazyFill marker");
+    }
+    if (!/^eazyfill-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-backup\.eazyfill$/i.test(download.suggestedFilename())) {
+      throw new Error(`Unexpected backup filename: ${download.suggestedFilename()}`);
     }
     if (/Secret Rule|Secret Script|secret-value|secret-code|secret\.example/.test(backupText)) {
       throw new Error("Encrypted backup leaked plaintext data");
     }
 
-    await sendRuntime(page, { type: "SET_EXTENSION_STORAGE", values: { fp_rules: [], fp_scripts: [] } });
+    await sendRuntime(page, {
+      type: "SET_EXTENSION_STORAGE",
+      values: {
+        fp_rules: [],
+        fp_scripts: [],
+        fp_profiles: []
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#backup-restore-btn");
+      return button && button.disabled === false;
+    }, null, { timeout: 10000 });
+    await page.click('[data-panel="sync-panel"]');
     const chooserPromise = page.waitForEvent("filechooser");
     await page.click("#backup-restore-btn");
     const chooser = await chooserPromise;
+    page.once("dialog", (dialog) => dialog.accept("Restored QA"));
     await chooser.setFiles(savePath);
-    await page.waitForFunction(() => /Backup restored/i.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 10000 });
+    await page.waitForFunction(() => /Imported \d+ rules/i.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 10000 });
 
-    const restored = await sendRuntime(page, { type: "GET_EXTENSION_STORAGE", keys: ["fp_rules", "fp_scripts"] });
-    const rule = restored.data?.fp_rules?.find((item) => item.id === "rule_secret");
-    const script = restored.data?.fp_scripts?.find((item) => item.id === "script_secret");
-    if (!rule || !script) {
+    const restored = await sendRuntime(page, { type: "GET_EXTENSION_STORAGE", keys: ["fp_rules", "fp_scripts", "fp_profiles"] });
+    const rule = restored.data?.fp_rules?.find((item) => item.name === "Secret Rule");
+    const script = restored.data?.fp_scripts?.find((item) => item.name === "Secret Script");
+    const profile = restored.data?.fp_profiles?.find((item) => item.name === "Restored QA");
+    if (!rule || !script || !profile) {
       throw new Error(`Restore did not recover protected data: ${JSON.stringify(restored)}`);
+    }
+    if (rule.id === "rule_secret" || script.id === "script_secret" || script.enabled !== false) {
+      throw new Error(`Restore did not isolate imported data: ${JSON.stringify({ rule, script })}`);
     }
 
     console.log(JSON.stringify({
@@ -137,7 +172,8 @@ function sendRuntime(page, message) {
       encryptedBytes: backupText.length,
       restored: {
         rules: restored.data.fp_rules.length,
-        scripts: restored.data.fp_scripts.length
+        scripts: restored.data.fp_scripts.length,
+        profiles: restored.data.fp_profiles.length
       }
     }, null, 2));
   } finally {

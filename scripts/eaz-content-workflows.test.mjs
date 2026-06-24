@@ -92,7 +92,7 @@ try {
               ruleType: "instant",
               profileId: "default",
               profileIds: ["default"],
-              execution: { mode: "instant", delayMs: 0, waitTimeoutMs: 1000, runOnce: false },
+              execution: { mode: "instant", delayMs: 0, waitTimeoutMs: 1000, runOnce: true },
               steps: [{
                 order: 1,
                 action: "set_value",
@@ -108,7 +108,7 @@ try {
               ruleType: "instant",
               profileId: "default",
               profileIds: ["default"],
-              execution: { mode: "instant", delayMs: 0, waitTimeoutMs: 1000, runOnce: false },
+              execution: { mode: "instant", delayMs: 0, waitTimeoutMs: 1000, runOnce: true },
               actions: [{
                 order: 1,
                 type: "fill",
@@ -210,7 +210,15 @@ try {
 
   await page.locator("#name").fill("");
   await page.locator("#legacy").fill("");
-  const autofillResult = await page.evaluate(() => globalThis.__dispatchRuntimeMessage({ type: "AUTOFILL_EXECUTE_NOW" }));
+  const runOnceResult = await page.evaluate(() => globalThis.__dispatchRuntimeMessage({ type: "AUTOFILL_EXECUTE_NOW" }));
+  assert.equal(runOnceResult.ok, true);
+  assert.equal(await page.locator("#name").inputValue(), "");
+  assert.equal(await page.locator("#legacy").inputValue(), "");
+
+  const autofillResult = await page.evaluate(() => globalThis.__dispatchRuntimeMessage({
+    type: "AUTOFILL_EXECUTE_NOW",
+    force: true
+  }));
   assert.equal(autofillResult.ok, true);
   assert.equal(autofillResult.matchedRules, 2);
   assert.equal(autofillResult.executedRules, 2);

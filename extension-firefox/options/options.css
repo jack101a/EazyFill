@@ -1325,6 +1325,12 @@ html[data-theme="light"] .secondary-btn {
   border-color: color-mix(in srgb, var(--danger) 26%, transparent);
 }
 
+.admin-chip.warning {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 28%, transparent);
+}
+
 .admin-chip.muted {
   color: var(--text-muted);
 }

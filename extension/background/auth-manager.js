@@ -1,17 +1,7 @@
 import { getExtensionStorage, removeProtectedValues, setExtensionStorage } from "./protected-storage.js";
 
-function sanitizeApiKey(apiKey) {
-  return String(apiKey || "").trim();
-}
-
-function keyPrefix(apiKey) {
-  const clean = sanitizeApiKey(apiKey);
-  if (!clean) return "";
-  return clean.length <= 12 ? clean : `${clean.slice(0, 8)}...${clean.slice(-4)}`;
-}
-
 function hasCredential(auth = {}) {
-  return !!String(auth.sessionToken || auth.apiKey || "").trim();
+  return !!String(auth.sessionToken || auth.session_token || "").trim();
 }
 
 function authSnapshot(auth = {}) {
@@ -19,7 +9,7 @@ function authSnapshot(auth = {}) {
   return {
     authenticated,
     valid: auth.valid !== false && hasCredential(auth),
-    keyPrefix: auth.keyPrefix || (auth.apiKey ? keyPrefix(auth.apiKey) : "Session"),
+    keyPrefix: "Session",
     user: auth.user || null,
     plan: auth.plan || null,
     credits: auth.credits || null,
@@ -74,11 +64,6 @@ export function createAuthManager({ apiClient }) {
     return { ok: true, auth: authSnapshot(await getAuthRecord()) };
   }
 
-  async function verifyApiKey(apiKey) {
-    const response = await apiClient.post("/v2/auth/verify-key", { api_key: apiKey }, { retry: false, skipAuth: true });
-    return normalizeVerification(response);
-  }
-
   function normalizeVerification(response) {
     return {
       valid: response.valid !== false,
@@ -96,40 +81,6 @@ export function createAuthManager({ apiClient }) {
       syncSecret: response.sync_secret || response.syncSecret || "",
       keyInfo: response.key_info || null
     };
-  }
-
-  async function saveApiKey(apiKey, options = {}) {
-    const clean = sanitizeApiKey(apiKey);
-    if (!clean) throw new Error("Sign in is required");
-    if (!clean.startsWith("fp_") && options.allowLegacyPrefix !== true) {
-      throw new Error("This EazyFill sign-in token is not supported");
-    }
-
-    let verification = null;
-    if (options.verify !== false) {
-      verification = await verifyApiKey(clean);
-      if (!verification.valid) throw new Error("Could not verify this EazyFill session");
-    }
-
-    const auth = {
-      apiKey: clean,
-      keyPrefix: keyPrefix(clean),
-      valid: verification ? verification.valid : true,
-      user: verification?.user || null,
-      plan: verification?.plan || null,
-      credits: verification?.credits || null,
-      device: verification?.device || null,
-      session: verification?.session || null,
-      sessionToken: verification?.sessionToken || "",
-      syncSecret: verification?.syncSecret || "",
-      keyInfo: verification?.keyInfo || null,
-      lastVerifiedAt: verification ? Date.now() : null,
-      lastError: ""
-    };
-    await setExtensionStorage({ fp_auth: auth });
-    await applyPlanGatedSettings(auth.plan);
-    if (verification?.credits) await setExtensionStorage({ fp_credits: verification.credits });
-    return { ok: true, auth: authSnapshot(auth) };
   }
 
   async function registerAccount(payload = {}) {
@@ -153,10 +104,8 @@ export function createAuthManager({ apiClient }) {
     }, { retry: false, skipAuth: true });
     const verification = normalizeVerification(response);
     if (!verification.sessionToken) throw new Error("OTP verified but sign-in could not be completed");
-    const apiKey = sanitizeApiKey(response.api_key);
     const auth = {
-      apiKey,
-      keyPrefix: apiKey ? keyPrefix(apiKey) : "Session",
+      keyPrefix: "Session",
       valid: verification.valid,
       user: verification.user,
       plan: verification.plan,
@@ -229,8 +178,6 @@ export function createAuthManager({ apiClient }) {
     logout,
     refreshCachedStatus,
     registerAccount,
-    saveApiKey,
-    verifyApiKey,
     verifyOtp
   };
 }

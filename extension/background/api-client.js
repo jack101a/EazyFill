@@ -1,10 +1,10 @@
 import { getExtensionStorage } from "./protected-storage.js";
+import { DEFAULT_API_BASE_URL } from "../lib/app-config.js";
 
-const DEFAULT_API_BASE = "https://eazyfill.app";
 const DEFAULT_TIMEOUT_MS = 15000;
 
 function trimBaseUrl(value) {
-  return String(value || DEFAULT_API_BASE).replace(/\/+$/, "");
+  return String(value || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
 }
 
 function joinUrl(baseUrl, path) {
@@ -23,9 +23,8 @@ async function getDeviceId() {
 async function readClientContext() {
   const data = await getExtensionStorage(["fp_auth", "fp_settings"]);
   return {
-    apiKey: String(data.fp_auth?.apiKey || "").trim(),
     sessionToken: String(data.fp_auth?.sessionToken || data.fp_auth?.session_token || "").trim(),
-    baseUrl: trimBaseUrl(data.fp_settings?.apiBaseUrl || DEFAULT_API_BASE),
+    baseUrl: trimBaseUrl(data.fp_settings?.apiBaseUrl || DEFAULT_API_BASE_URL),
     deviceId: await getDeviceId()
   };
 }
@@ -38,7 +37,7 @@ async function parseResponse(response) {
 }
 
 export function createApiClient(options = {}) {
-  const defaultBaseUrl = trimBaseUrl(options.baseUrl || DEFAULT_API_BASE);
+  const defaultBaseUrl = trimBaseUrl(options.baseUrl || DEFAULT_API_BASE_URL);
 
   async function request(path, requestOptions = {}) {
     const context = await readClientContext();
@@ -55,7 +54,6 @@ export function createApiClient(options = {}) {
     };
     if (requestOptions.skipAuth !== true) {
       if (context.sessionToken) headers["X-EazyFill-Session"] = context.sessionToken;
-      else if (context.apiKey) headers["X-Api-Key"] = context.apiKey;
     }
 
     try {

@@ -152,7 +152,7 @@ async function getUserscriptsEnabled() {
 }
 
 function isAuthenticatedAuth(auth = {}) {
-  return !!String(auth.sessionToken || auth.session_token || auth.apiKey || auth.api_key || "").trim()
+  return !!String(auth.sessionToken || auth.session_token || "").trim()
     && auth.valid !== false;
 }
 

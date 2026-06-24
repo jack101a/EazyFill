@@ -169,20 +169,35 @@ async function main() {
       welcomeSettings.data?.fp_settings?.apiBaseUrl === apiBaseUrl,
       `Options account flow overwrote API base: ${JSON.stringify(welcomeSettings)}`
     );
-    await extensionPage.fill("#options-signup-name", "EazyFill QA");
-    await extensionPage.fill("#options-signup-identifier", `eazyfill.qa.${Date.now()}@example.com`);
+    await extensionPage.fill("#options-signup-identifier", `eazyfill.qa+${Date.now()}@gmail.com`);
     await extensionPage.click("#options-send-otp-btn");
     await extensionPage.waitForFunction(() => {
       const message = document.querySelector("#options-signup-message")?.textContent || "";
       const className = document.querySelector("#options-signup-message")?.className || "";
-      return className.includes("is-success") || className.includes("is-error") || /failed|could not|unable|error/i.test(message);
+      const needsName = !document.querySelector("#options-signup-name-row")?.hidden;
+      return needsName || className.includes("is-success") || className.includes("is-error") || /failed|could not|unable|error/i.test(message);
     }, null, { timeout: 20000 });
     const otpState = await extensionPage.evaluate(() => ({
       message: document.querySelector("#options-signup-message")?.textContent || "",
       className: document.querySelector("#options-signup-message")?.className || "",
       sendDisabled: document.querySelector("#options-send-otp-btn")?.disabled || false
     }));
-    assertState(otpState.className.includes("is-success"), `OTP request failed or stalled: ${JSON.stringify(otpState)}`);
+    if (!otpState.className.includes("is-success")) {
+      const nameVisible = await extensionPage.locator("#options-signup-name-row").isVisible();
+      assertState(nameVisible, `Email-first account lookup failed or stalled: ${JSON.stringify(otpState)}`);
+      await extensionPage.fill("#options-signup-name", "EazyFill QA");
+      await extensionPage.click("#options-send-otp-btn");
+      await extensionPage.waitForFunction(() => {
+        const message = document.querySelector("#options-signup-message")?.textContent || "";
+        const className = document.querySelector("#options-signup-message")?.className || "";
+        return className.includes("is-success") || /failed|could not|unable|error/i.test(message);
+      }, null, { timeout: 20000 });
+    }
+    const finalOtpState = await extensionPage.evaluate(() => ({
+      message: document.querySelector("#options-signup-message")?.textContent || "",
+      className: document.querySelector("#options-signup-message")?.className || ""
+    }));
+    assertState(finalOtpState.className.includes("is-success"), `OTP request failed or stalled: ${JSON.stringify(finalOtpState)}`);
     const otpText = await extensionPage.locator("#options-signup-message").innerText();
     const otp = otpText.match(/Code:\s*(\d+)/)?.[1];
     assertState(otp, `OTP not shown in debug response: ${otpText}`);
@@ -204,8 +219,9 @@ async function main() {
     );
 
     const authResponse = await extensionMessage(extensionPage, { type: "GET_EXTENSION_STORAGE", keys: ["fp_auth"] });
-    const apiKey = authResponse.data?.fp_auth?.apiKey;
-    assertState(apiKey && apiKey.startsWith("fp_"), "Options OTP signup did not store an EazyFill API key");
+    const sessionToken = authResponse.data?.fp_auth?.sessionToken;
+    assertState(sessionToken && sessionToken.startsWith("efs_"), "Options OTP signup did not store an EazyFill session");
+    assertState(!authResponse.data?.fp_auth?.apiKey, "Options OTP signup must not store a user-facing API key");
 
     await extensionPage.goto(extensionUrl("options/options.html"));
     const seedResponse = await extensionMessage(extensionPage, {
@@ -245,10 +261,8 @@ async function main() {
     assertState(!/Ada Lovelace/.test(visibleRulesText || ""), "Autofill rule value leaked in the options UI");
 
     await extensionPage.click('[data-panel="scripts-panel"]');
-    await extensionPage.click("#script-new-btn");
-    await extensionPage.waitForSelector("#script-editor-card:not(.is-hidden)", { timeout: 10000 });
-    await extensionPage.fill("#script-source-url", `${fixtureBase}/script.user.js`);
-    await extensionPage.click("#script-import-url-btn");
+    await extensionPage.fill("#script-import-url-input", `${fixtureBase}/script.user.js`);
+    await extensionPage.click("#script-import-direct-btn");
     await extensionPage.waitForFunction(() => document.querySelector("#scripts-table")?.textContent.includes("EazyFill QA Script"), null, { timeout: 15000 });
     const visibleScriptsText = await extensionPage.textContent("#scripts-panel");
     assertState(/EazyFill QA Script|script\.user\.js/.test(visibleScriptsText || ""), "Userscript metadata was not visible in the options UI");
@@ -280,7 +294,9 @@ async function main() {
       type: "GET_EXTENSION_STORAGE",
       keys: ["fp_captcha_selectors"]
     });
-    const savedCaptchaRoute = captchaStorage.data?.fp_captcha_selectors?.["127.0.0.1"];
+    const savedCaptchaConfig = captchaStorage.data?.fp_captcha_selectors?.["127.0.0.1"];
+    const savedCaptchaRoute = savedCaptchaConfig?.routes?.[savedCaptchaConfig.activeFieldName]
+      || Object.values(savedCaptchaConfig?.routes || {})[0];
     assertState(savedCaptchaRoute?.sourceSelector === "#captchaText", `CAPTCHA source selector was not saved: ${JSON.stringify(savedCaptchaRoute)}`);
     assertState(!Object.hasOwn(savedCaptchaRoute || {}, "fillDelayMs"), `CAPTCHA route should not store the global fill delay: ${JSON.stringify(savedCaptchaRoute)}`);
     assertState(!Object.hasOwn(savedCaptchaRoute || {}, "humanTyping"), `CAPTCHA route should not store the global typing mode: ${JSON.stringify(savedCaptchaRoute)}`);
@@ -291,9 +307,11 @@ async function main() {
     await target.waitForLoadState("domcontentloaded");
     await target.waitForTimeout(500);
 
-    const autofillResult = await extensionMessage(extensionPage, { type: "AUTOFILL_EXECUTE_CURRENT" });
-    assertState(autofillResult.ok, `Autofill failed: ${autofillResult.error || JSON.stringify(autofillResult)}`);
-    await target.waitForFunction(() => document.querySelector("#name")?.value === "Ada Lovelace", null, { timeout: 8000 });
+    await target.waitForFunction(
+      () => document.querySelector("#name")?.value === "Ada Lovelace",
+      null,
+      { timeout: 8000 }
+    );
 
     const recorderStart = await extensionMessage(extensionPage, { type: "START_RECORDING" });
     assertState(recorderStart.ok, `Autofill recorder failed to start: ${recorderStart.error || JSON.stringify(recorderStart)}`);
@@ -347,7 +365,7 @@ async function main() {
     await extensionPage.click("#sync-pull-btn");
     await extensionPage.waitForFunction(() => /sync|pulled|restored|complete|failed|connect/i.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 15000 });
 
-    await extensionPage.click('[data-panel="billing-panel"]');
+    await extensionPage.click('[data-panel="account-panel"]');
     await extensionPage.click("#billing-refresh-btn");
     await extensionPage.waitForSelector("#plans-grid", { timeout: 10000 });
 

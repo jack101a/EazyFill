@@ -518,7 +518,7 @@
 
   async function executeStep(rule, step, context) {
     const key = stepKey(rule, step);
-    if (rule.execution.runOnce !== false && completedStepKeys.has(key)) {
+    if (!context.force && rule.execution.runOnce !== false && completedStepKeys.has(key)) {
       return { ok: true, skipped: true, completed: true, action: step.action, label: step.label || "" };
     }
 
@@ -591,7 +591,8 @@
       delayMs: rule.execution.delayMs,
       waitTimeoutMs: rule.execution.waitTimeoutMs,
       profileValues: profileValues(profiles, activeProfileId(settings)),
-      settings
+      settings,
+      force: options.force === true
     };
     const results = [];
 
