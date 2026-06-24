@@ -16,20 +16,21 @@ User-controlled CAPTCHA assistance, reusable form-filling rules, and userscript 
 
 ## Detailed Description
 
-EazyFill helps users with repetitive browser tasks through three user-controlled tools in one Manifest V3 extension: configured CAPTCHA assistance, reusable form-filling rules, and a userscript manager that uses the browser's User Scripts API where supported.
+EazyFill helps you save time on repetitive browser work.
 
-Users choose the sites, selectors, rules, profiles, settings, and scripts involved. Rules, scripts, profiles, CAPTCHA selectors, and settings are stored in the browser. Optional cloud sync encrypts that selected extension data before upload. The service backend verifies email-based accounts, sessions, devices, plans, and credits, processes requested CAPTCHA content, and supports billing records.
+Use it to set up CAPTCHA field assistance, save reusable form-filling rules, and manage userscripts from one extension.
 
-Core features:
+You stay in control: choose the sites, selectors, profiles, and scripts you want to use. Your rules and settings stay in browser storage, with optional encrypted cloud sync for supported plans.
 
-- Configure source and target selectors for supported image or text CAPTCHA assistance.
-- Record or author reusable form-filling steps and run them on matching pages.
-- Manage userscripts with metadata and match patterns.
-- Export and import local rules, scripts, profiles, selectors, and settings.
-- Optionally sync an encrypted copy of extension data across compatible installations.
-- View plan, credit, usage, and billing status.
+Useful for:
 
-EazyFill assists with user-selected actions; it does not guarantee that a page, form, script, or CAPTCHA will work. Websites can change selectors or block extension behavior, and users remain responsible for reviewing actions and following each site's rules.
+- Filling repeat forms faster.
+- Saving site-specific autofill steps.
+- Managing userscripts with simple enable/disable controls.
+- Importing and exporting extension data.
+- Checking credits, plan status, and sync options.
+
+EazyFill assists with user-selected actions. Websites can change or block extension behavior, so users should review actions and follow each site's rules.
 
 ## Privacy Summary
 
@@ -55,6 +56,12 @@ Required Chrome Web Store image tasks:
 - [ ] Capture approved 1280x800 or 640x400 screenshots.
 - [ ] Create an approved 440x280 small promo tile if used.
 - [ ] Create an approved 920x680 large promo tile if used.
+
+## Asset Choices
+
+- Extension icon / store icon: `extension/icons/icon128.png`.
+- Promo image or screenshot branding on a light background: `extension/brand/logo-dark.png`.
+- Promo image or screenshot branding on a dark background: `extension/brand/logo-light.png`.
 
 ## Review Notes
 
