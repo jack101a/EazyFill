@@ -1097,6 +1097,52 @@ function ruleSteps(rule) {
   return [];
 }
 
+function normalizeRuleMode(rule = {}) {
+  const raw = String(rule.ruleType || rule.rule_type || rule.execution?.mode || "instant").trim().toLowerCase();
+  return ["flow", "step", "step_by_step"].includes(raw) ? "flow" : "instant";
+}
+
+function ruleModeLabel(rule = {}) {
+  return normalizeRuleMode(rule) === "flow" ? "Step-by-step" : "Instant";
+}
+
+function normalizeRuleMatchMode(value) {
+  const raw = String(value || "domain").trim();
+  const compact = raw.replace(/_/g, "").toLowerCase();
+  if (compact === "domainpath") return "domainPath";
+  if (compact === "fullurl" || compact === "exacturl") return "fullUrl";
+  if (compact === "urlprefix") return "url_prefix";
+  if (compact === "urlpattern") return "url_pattern";
+  if (compact === "regex") return "regex";
+  if (compact === "path") return "path";
+  return "domain";
+}
+
+function ruleExecution(rule = {}) {
+  const mode = normalizeRuleMode(rule);
+  const execution = rule.execution || {};
+  return {
+    mode,
+    delayMs: Number(execution.delayMs ?? execution.delay_ms ?? (mode === "flow" ? 150 : 100)),
+    waitTimeoutMs: Number(execution.waitTimeoutMs ?? execution.wait_timeout_ms ?? (mode === "flow" ? 5000 : 3000)),
+    runOnce: execution.runOnce ?? execution.run_once ?? true,
+    stopOnError: execution.stopOnError ?? execution.stop_on_error ?? mode === "flow"
+  };
+}
+
+function stepRuntime(step = {}) {
+  const runtime = step.runtime || {};
+  return {
+    delayMs: runtime.delayMs ?? runtime.delay_ms ?? step.delayMs ?? step.delay_ms ?? "",
+    timeoutMs: runtime.timeoutMs ?? runtime.timeout_ms ?? step.timeoutMs ?? step.timeout_ms ?? "",
+    verifyAfterFill: runtime.verifyAfterFill ?? runtime.verify_after_fill ?? step.verifyAfterFill ?? step.verify_after_fill ?? true
+  };
+}
+
+function stepIsRequired(step = {}) {
+  return step.required !== false && step.runtime?.required !== false;
+}
+
 function selectorLabel(step) {
   const selector = step?.selector || {};
   const element = step?.element || {};
@@ -1159,8 +1205,22 @@ function renderRuleDetailsRow(tbody, rule) {
   const cell = document.createElement("td");
   cell.colSpan = 5;
   const box = node("div", "rule-details-box");
-  const title = node("div", "rule-details-title", "Fields, flow steps, and selectors");
+  const title = node("div", "rule-details-title", "Execution and recorded steps");
   box.append(title);
+  const execution = ruleExecution(rule);
+  const site = rule.site || {};
+  const executionSummary = node("div", "rule-execution-summary");
+  executionSummary.append(
+    chip(ruleModeLabel(rule), "success"),
+    chip(`Delay ${execution.delayMs} ms`, "muted"),
+    chip(`Timeout ${execution.waitTimeoutMs} ms`, "muted"),
+    chip(execution.runOnce ? "Run once" : "Repeat allowed", "muted"),
+    chip(execution.stopOnError ? "Stop on error" : "Continue on error", "muted"),
+    chip(`Priority ${Number(rule.priority ?? 100)}`, "muted"),
+    chip(`Match ${normalizeRuleMatchMode(site.matchMode || site.match_mode || rule.matchMode || rule.match_mode)}`, "mono")
+  );
+  if (site.path || rule.path) executionSummary.append(chip(`Path ${site.path || rule.path}`, "mono"));
+  box.append(executionSummary);
   const steps = ruleSteps(rule);
   if (!steps.length) {
     box.append(node("p", "empty-copy", "No steps saved for this rule."));
@@ -1168,13 +1228,23 @@ function renderRuleDetailsRow(tbody, rule) {
     const list = node("div", "rule-step-list");
     steps.forEach((step, index) => {
       const item = node("div", "rule-step-item");
-      const heading = node("div", "rule-step-heading", `Step ${index + 1} · ${step.action || step.type || "set_value"}`);
+      const runtime = stepRuntime(step);
+      const heading = node("div", "rule-step-heading", `Step ${index + 1} | ${step.action || step.type || "set_value"}`);
       const meta = node("div", "rule-step-meta");
       meta.append(chip(selectorLabel(step), "muted"));
       for (const summary of ruleSelectorSummaries({ steps: [step] }, true)) {
         meta.append(chip(summary, "mono"));
       }
+      meta.append(
+        chip(stepIsRequired(step) ? "Required" : "Optional", stepIsRequired(step) ? "warning" : "muted"),
+        chip(runtime.delayMs === "" ? "Rule delay" : `${runtime.delayMs} ms delay`, "muted"),
+        chip(runtime.timeoutMs === "" ? "Rule timeout" : `${runtime.timeoutMs} ms timeout`, "muted"),
+        chip(runtime.verifyAfterFill === false ? "No verification" : "Verify value", "muted")
+      );
       item.append(heading, meta);
+      if (step.value !== undefined && step.value !== "") {
+        item.append(node("div", "rule-step-value", `Value: ${String(step.value)}`));
+      }
       list.append(item);
     });
     box.append(list);
@@ -1234,7 +1304,9 @@ function renderRules() {
       siteCell.append(node("div", "admin-secondary", ruleAccessSummary(rule)));
 
       const statusCell = document.createElement("td");
-      statusCell.append(chip(runtime.label, runtime.tone));
+      const statusChips = node("div", "chip-wrap");
+      statusChips.append(chip(runtime.label, runtime.tone), chip(ruleModeLabel(rule), "muted"));
+      statusCell.append(statusChips);
       statusCell.append(node("div", "admin-secondary", `${runtime.detail} | ${steps} step${steps === 1 ? "" : "s"}`));
 
       const selectorCell = document.createElement("td");
@@ -2767,17 +2839,29 @@ function renderBilling() {
 function selectRule(id) {
   state.selectedRuleId = id;
   const rule = id ? (state.rules.find((item) => item.id === id) || { steps: [] }) : { steps: [] };
+  const site = rule.site || {};
+  const mode = normalizeRuleMode(rule);
+  const execution = ruleExecution(rule);
   renderProfileOptions();
   $("rule-id").value = id || "";
   $("rule-name").value = rule.name || "";
-  $("rule-domain").value = rule.domain || rule.site?.pattern || "";
+  $("rule-match-mode").value = normalizeRuleMatchMode(site.matchMode || site.match_mode || rule.matchMode || rule.match_mode);
+  $("rule-domain").value = site.pattern || rule.domain || rule.host || "";
+  $("rule-path").value = site.path || rule.path || "";
   if ($("rule-profile-id")) $("rule-profile-id").value = id ? itemProfileId(rule) : DEFAULT_PROFILE_ID;
   $("rule-enabled").checked = rule.enabled !== false;
+  $("rule-mode-instant").checked = mode === "instant";
+  $("rule-mode-flow").checked = mode === "flow";
+  $("rule-delay-ms").value = String(execution.delayMs);
+  $("rule-timeout-ms").value = String(execution.waitTimeoutMs);
+  $("rule-priority").value = String(Number(rule.priority ?? 100));
+  $("rule-run-once").checked = execution.runOnce !== false;
+  $("rule-stop-on-error").checked = execution.stopOnError === true;
 
   setHidden("rules-list-view", true);
   setHidden("rules-editor-view", false);
 
-  renderRuleSteps(rule.steps || []);
+  renderRuleSteps(ruleSteps(rule));
 }
 
 function selectorDisplayValue(selector) {
@@ -2822,6 +2906,20 @@ function editorActionForStep(step = {}) {
   return step.action || "set_value";
 }
 
+function stepCaptureSummary(step = {}) {
+  const selector = step.selector && typeof step.selector === "object" ? step.selector : {};
+  const element = step.element && typeof step.element === "object" ? step.element : {};
+  const meta = step.meta && typeof step.meta === "object" ? step.meta : {};
+  const parts = [];
+  if (selector.strategy) parts.push(`Selector ${selector.strategy}`);
+  if (selector.confidence !== undefined && selector.confidence !== null) parts.push(`Confidence ${selector.confidence}%`);
+  const tag = element.tag || element.tagName || element.tag_name || "";
+  const type = element.type || "";
+  if (tag || type) parts.push(`Element ${[tag, type].filter(Boolean).join("/")}`);
+  if (meta.path) parts.push(`Recorded ${meta.path}`);
+  return parts.join(" | ");
+}
+
 function renderRuleSteps(steps) {
   const container = $("rule-steps-container");
   if (!container) return;
@@ -2838,13 +2936,12 @@ function renderRuleSteps(steps) {
   }
   steps.forEach((step, index) => {
     const selectedAction = editorActionForStep(step);
+    const runtime = stepRuntime(step);
     const stepEl = document.createElement("tr");
     stepEl.className = "step-row";
     stepEl.dataset.index = index;
+    stepEl.dataset.stepJson = selectorJson(step);
     stepEl.dataset.selectorJson = selectorJson(step.selector);
-    stepEl.dataset.runtimeJson = selectorJson(step.runtime || {});
-    stepEl.dataset.elementJson = selectorJson(step.element || {});
-    stepEl.dataset.metaJson = selectorJson(step.meta || {});
     stepEl.setAttribute("draggable", "true");
 
     const dragCell = document.createElement("td");
@@ -2896,22 +2993,16 @@ function renderRuleSteps(steps) {
     valueInput.className = "step-value autofill-input";
     valueInput.value = String(step.value ?? "");
     valueInput.placeholder = "Value (e.g. {@email})";
-    const editButton = document.createElement("button");
-    editButton.className = "edit-badge-btn";
-    editButton.type = "button";
-    editButton.title = "Edit text value";
-    editButton.textContent = "Edit";
-    valueContainer.append(valueInput, editButton);
+    valueContainer.append(valueInput);
     valueCell.append(valueContainer);
 
     const siteCell = document.createElement("td");
-    const siteBadge = document.createElement("span");
-    siteBadge.className = "site-badge";
-    siteBadge.textContent = $("rule-domain")?.value || "*";
-    siteCell.append(siteBadge);
+    const stepNumber = node("div", "step-number", String(index + 1));
+    const requirement = chip(stepIsRequired(step) ? "Required" : "Optional", stepIsRequired(step) ? "warning" : "muted");
+    siteCell.append(stepNumber, requirement);
 
     const removeCell = document.createElement("td");
-    removeCell.className = "text-center";
+    removeCell.className = "step-actions";
     const removeButton = document.createElement("button");
     removeButton.className = "remove-step-btn autofill-remove";
     removeButton.type = "button";
@@ -2919,6 +3010,66 @@ function renderRuleSteps(steps) {
     removeButton.textContent = "-";
     removeCell.append(removeButton);
     stepEl.append(dragCell, actionCell, selectorCell, valueCell, siteCell, removeCell);
+
+    const advancedRow = document.createElement("tr");
+    advancedRow.className = "step-advanced-row";
+    advancedRow.dataset.index = index;
+    const advancedCell = document.createElement("td");
+    advancedCell.colSpan = 6;
+    const advancedGrid = node("div", "step-advanced-grid");
+
+    const fieldKeyLabel = document.createElement("label");
+    fieldKeyLabel.append(document.createTextNode("Field Key"));
+    const fieldKeyInput = document.createElement("input");
+    fieldKeyInput.type = "text";
+    fieldKeyInput.className = "step-field-key autofill-input";
+    fieldKeyInput.value = step.fieldKey || step.field_key || "";
+    fieldKeyInput.placeholder = "e.g. email";
+    fieldKeyLabel.append(fieldKeyInput);
+
+    const delayLabel = document.createElement("label");
+    delayLabel.append(document.createTextNode("Delay (ms)"));
+    const delayInput = document.createElement("input");
+    delayInput.type = "number";
+    delayInput.min = "0";
+    delayInput.max = "5000";
+    delayInput.step = "10";
+    delayInput.className = "step-delay-ms autofill-input";
+    delayInput.value = runtime.delayMs === "" ? "" : String(runtime.delayMs);
+    delayInput.placeholder = "Rule default";
+    delayLabel.append(delayInput);
+
+    const timeoutLabel = document.createElement("label");
+    timeoutLabel.append(document.createTextNode("Timeout (ms)"));
+    const timeoutInput = document.createElement("input");
+    timeoutInput.type = "number";
+    timeoutInput.min = "0";
+    timeoutInput.max = "60000";
+    timeoutInput.step = "100";
+    timeoutInput.className = "step-timeout-ms autofill-input";
+    timeoutInput.value = runtime.timeoutMs === "" ? "" : String(runtime.timeoutMs);
+    timeoutInput.placeholder = "Rule default";
+    timeoutLabel.append(timeoutInput);
+
+    const requiredLabel = node("label", "step-check-control");
+    const requiredInput = document.createElement("input");
+    requiredInput.type = "checkbox";
+    requiredInput.className = "step-required";
+    requiredInput.checked = stepIsRequired(step);
+    requiredLabel.append(requiredInput, document.createTextNode("Required"));
+
+    const verifyLabel = node("label", "step-check-control");
+    const verifyInput = document.createElement("input");
+    verifyInput.type = "checkbox";
+    verifyInput.className = "step-verify";
+    verifyInput.checked = runtime.verifyAfterFill !== false;
+    verifyLabel.append(verifyInput, document.createTextNode("Verify Value"));
+
+    advancedGrid.append(fieldKeyLabel, delayLabel, timeoutLabel, requiredLabel, verifyLabel);
+    const captureSummary = stepCaptureSummary(step);
+    if (captureSummary) advancedGrid.append(node("div", "step-capture-meta", captureSummary));
+    advancedCell.append(advancedGrid);
+    advancedRow.append(advancedCell);
 
     // Drag and Drop Event Listeners
     stepEl.addEventListener("dragstart", (e) => {
@@ -2967,15 +3118,7 @@ function renderRuleSteps(steps) {
       renderRuleSteps(currentSteps);
     });
 
-    const ruleDomainInput = $("rule-domain");
-    if (ruleDomainInput) {
-      ruleDomainInput.addEventListener("input", () => {
-        const badge = stepEl.querySelector(".site-badge");
-        if (badge) badge.textContent = ruleDomainInput.value || "*";
-      });
-    }
-
-    container.append(stepEl);
+    container.append(stepEl, advancedRow);
   });
 }
 
@@ -2988,23 +3131,35 @@ function readRuleSteps() {
     const actionEl = el.querySelector(".step-action");
     const selectorEl = el.querySelector(".step-selector");
     const valueEl = el.querySelector(".step-value");
+    const advanced = container.querySelector(`tr.step-advanced-row[data-index="${index}"]`);
     if (actionEl && selectorEl && valueEl) {
-      let runtime = {};
-      let element = {};
-      let meta = {};
-      try { runtime = JSON.parse(el.dataset.runtimeJson || "{}"); } catch (_) {}
-      try { element = JSON.parse(el.dataset.elementJson || "{}"); } catch (_) {}
-      try { meta = JSON.parse(el.dataset.metaJson || "{}"); } catch (_) {}
+      let preserved = {};
+      try { preserved = JSON.parse(el.dataset.stepJson || "{}"); } catch (_) {}
+      const runtime = {
+        ...(preserved.runtime && typeof preserved.runtime === "object" ? preserved.runtime : {})
+      };
+      delete runtime.delay_ms;
+      delete runtime.timeout_ms;
+      delete runtime.verify_after_fill;
+      const delayValue = advanced?.querySelector(".step-delay-ms")?.value ?? "";
+      const timeoutValue = advanced?.querySelector(".step-timeout-ms")?.value ?? "";
+      if (delayValue === "") delete runtime.delayMs;
+      else runtime.delayMs = Math.max(0, Math.min(5000, Number(delayValue) || 0));
+      if (timeoutValue === "") delete runtime.timeoutMs;
+      else runtime.timeoutMs = Math.max(0, Math.min(60000, Number(timeoutValue) || 0));
+      const required = advanced?.querySelector(".step-required")?.checked !== false;
+      runtime.required = required;
+      runtime.verifyAfterFill = advanced?.querySelector(".step-verify")?.checked !== false;
       steps.push({
+        ...preserved,
         order: index + 1,
         label: labelEl ? labelEl.value : "",
         action: actionEl.value,
         selector: readSelectorFromRow(el, selectorEl),
         value: valueEl.value,
-        required: false,
-        runtime,
-        element,
-        meta
+        fieldKey: advanced?.querySelector(".step-field-key")?.value.trim() || preserved.fieldKey || preserved.field_key || "",
+        required,
+        runtime
       });
     }
   });
@@ -3032,37 +3187,50 @@ async function saveSettings() {
   renderSettings();
 }
 
+function selectedRuleMode() {
+  return $("rule-mode-flow")?.checked ? "flow" : "instant";
+}
+
+function numericInputValue(id, fallback, min, max) {
+  const value = Number($(id)?.value);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
 async function saveRule() {
   const now = Date.now();
   const id = $("rule-id").value || state.selectedRuleId || makeId("rule");
   const existing = state.rules.find((item) => item.id === id) || {};
-  const domain = $("rule-domain").value.trim();
+  const pattern = $("rule-domain").value.trim();
+  const path = $("rule-path").value.trim();
   const existingSite = existing.site || {};
   const site = {
     ...existingSite,
-    matchMode: existingSite.matchMode || existingSite.match_mode || "domain",
-    pattern: domain || existingSite.pattern || existing.domain || "*"
+    matchMode: normalizeRuleMatchMode($("rule-match-mode").value),
+    pattern: pattern || existingSite.pattern || existing.domain || "*"
   };
-  if (existingSite.path) site.path = existingSite.path;
-  const ruleType = existing.ruleType || existing.rule_type || existing.execution?.mode || "instant";
+  delete site.match_mode;
+  if (path) site.path = path;
+  else delete site.path;
+  const ruleType = selectedRuleMode();
   const profileId = $("rule-profile-id") ? $("rule-profile-id").value : DEFAULT_PROFILE_ID;
   const rule = {
     ...existing,
     id,
     schemaVersion: existing.schemaVersion || existing.schema_version || 2,
     name: $("rule-name").value.trim() || "Untitled Rule",
-    domain: domain || existing.domain || site.pattern,
+    domain: site.pattern,
     site,
     ruleType,
     execution: {
       ...(existing.execution || {}),
       mode: ruleType,
-      delayMs: existing.execution?.delayMs ?? existing.execution?.delay_ms ?? 100,
-      waitTimeoutMs: existing.execution?.waitTimeoutMs ?? existing.execution?.wait_timeout_ms ?? 3000,
-      runOnce: existing.execution?.runOnce ?? existing.execution?.run_once ?? true,
-      stopOnError: existing.execution?.stopOnError ?? existing.execution?.stop_on_error ?? ruleType === "flow"
+      delayMs: numericInputValue("rule-delay-ms", ruleType === "flow" ? 150 : 100, 0, 5000),
+      waitTimeoutMs: numericInputValue("rule-timeout-ms", ruleType === "flow" ? 5000 : 3000, 0, 60000),
+      runOnce: $("rule-run-once").checked,
+      stopOnError: $("rule-stop-on-error").checked
     },
-    priority: Number(existing.priority ?? 100),
+    priority: numericInputValue("rule-priority", 100, 0, 10000),
     profileId,
     profileIds: [...new Set([...(existing.profileIds || existing.profile_ids || []), profileId].map(normalizedProfileId))],
     enabled: $("rule-enabled").checked,
@@ -3070,6 +3238,10 @@ async function saveRule() {
     createdAt: existing.createdAt || now,
     updatedAt: now
   };
+  delete rule.execution.delay_ms;
+  delete rule.execution.wait_timeout_ms;
+  delete rule.execution.run_once;
+  delete rule.execution.stop_on_error;
   state.rules = [...state.rules.filter((item) => item.id !== id), rule];
 
   setHidden("rules-editor-view", true);
@@ -3888,7 +4060,14 @@ async function pickSelector() {
   const steps = readRuleSteps();
   let step = [...steps].reverse().find((item) => !item.selector?.primary);
   if (!step) {
-    step = { action: "set_value", selector: { primary: "" }, value: "", required: false, label: "" };
+    step = {
+      action: "set_value",
+      selector: { primary: "" },
+      value: "",
+      required: true,
+      label: "",
+      runtime: { required: true, verifyAfterFill: true }
+    };
     steps.push(step);
   }
   step.selector = { ...result.pick.selector };
@@ -4043,7 +4222,14 @@ function bind() {
   if (ruleAddStepBtn) {
     ruleAddStepBtn.addEventListener("click", () => {
       const steps = readRuleSteps();
-      steps.push({ action: "set_value", selector: { primary: "" }, value: "", required: false, label: "" });
+      steps.push({
+        action: "set_value",
+        selector: { primary: "" },
+        value: "",
+        required: true,
+        label: "",
+        runtime: { required: true, verifyAfterFill: true }
+      });
       renderRuleSteps(steps);
     });
   }

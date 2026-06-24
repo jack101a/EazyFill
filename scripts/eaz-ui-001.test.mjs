@@ -111,14 +111,38 @@ async function installChromeMock(page, mode) {
         id: "rule_login",
         name: "Saved Login",
         domain: "example.com",
+        site: {
+          matchMode: "domainPath",
+          pattern: "example.com/login",
+          path: "/login"
+        },
+        ruleType: "flow",
+        execution: {
+          mode: "flow",
+          delayMs: 175,
+          waitTimeoutMs: 6200,
+          runOnce: false,
+          stopOnError: true
+        },
+        priority: 42,
         profileId: "work",
         enabled: true,
         steps: [{
           order: 1,
           label: "Email",
           action: "set_value",
-          selector: { primary: "#email", css: "#email" },
-          value: "{{email}}"
+          selector: { strategy: "css", primary: "#email", css: "#email", confidence: 92 },
+          value: "{{email}}",
+          fieldKey: "email",
+          required: true,
+          runtime: {
+            required: true,
+            delayMs: 250,
+            timeoutMs: 7000,
+            verifyAfterFill: false
+          },
+          element: { tag: "input", type: "email" },
+          meta: { path: "/login" }
         }]
       }],
       fp_profiles: [{
@@ -379,11 +403,56 @@ try {
   assert.equal(await optionsPage.locator("#panel-title").innerText(), "Autofill");
   const savedRuleRow = optionsPage.locator('#rules-table tr[data-id="rule_login"]');
   await savedRuleRow.waitFor();
+  assert.match(await savedRuleRow.innerText(), /Step-by-step/);
+  await savedRuleRow.getByRole("button", { name: "Details" }).click();
+  const savedRuleDetails = optionsPage.locator("#rules-table .details-row");
+  assert.match(await savedRuleDetails.innerText(), /Delay 175 ms/);
+  assert.match(await savedRuleDetails.innerText(), /250 ms delay/);
+  assert.match(await savedRuleDetails.innerText(), /7000 ms timeout/);
+  assert.match(await savedRuleDetails.innerText(), /No verification/);
+  assert.match(await savedRuleDetails.innerText(), /Value: \{\{email\}\}/);
   await savedRuleRow.getByRole("button", { name: "Edit" }).click();
   await optionsPage.waitForSelector("#rules-editor-view:not(.is-hidden)");
   assert.equal(await optionsPage.locator("#rule-name").inputValue(), "Saved Login");
   assert.equal(await optionsPage.locator("#rule-profile-id").inputValue(), "work");
-  await optionsPage.locator("#rule-back-btn").click();
+  assert.equal(await optionsPage.locator("#rule-match-mode").inputValue(), "domainPath");
+  assert.equal(await optionsPage.locator("#rule-domain").inputValue(), "example.com/login");
+  assert.equal(await optionsPage.locator("#rule-path").inputValue(), "/login");
+  assert.equal(await optionsPage.locator("#rule-mode-flow").isChecked(), true);
+  assert.equal(await optionsPage.locator("#rule-delay-ms").inputValue(), "175");
+  assert.equal(await optionsPage.locator("#rule-timeout-ms").inputValue(), "6200");
+  assert.equal(await optionsPage.locator("#rule-priority").inputValue(), "42");
+  assert.equal(await optionsPage.locator("#rule-run-once").isChecked(), false);
+  assert.equal(await optionsPage.locator("#rule-stop-on-error").isChecked(), true);
+  assert.equal(await optionsPage.locator(".step-field-key").inputValue(), "email");
+  assert.equal(await optionsPage.locator(".step-required").isChecked(), true);
+  assert.equal(await optionsPage.locator(".step-delay-ms").inputValue(), "250");
+  assert.equal(await optionsPage.locator(".step-timeout-ms").inputValue(), "7000");
+  assert.equal(await optionsPage.locator(".step-verify").isChecked(), false);
+  assert.match(await optionsPage.locator(".step-capture-meta").innerText(), /Selector css/);
+  assert.match(await optionsPage.locator(".step-capture-meta").innerText(), /Confidence 92%/);
+  assert.match(await optionsPage.locator(".step-capture-meta").innerText(), /Element input\/email/);
+  assert.match(await optionsPage.locator(".step-capture-meta").innerText(), /Recorded \/login/);
+  await captureSnapshot(optionsPage, "options-autofill-rule-editor");
+  await optionsPage.locator(".step-advanced-grid").scrollIntoViewIfNeeded();
+  await captureSnapshot(optionsPage, "options-autofill-rule-steps");
+  await optionsPage.locator("#rule-save-btn").click();
+  await optionsPage.waitForFunction(() => (
+    [...globalThis.__runtimeMessages].reverse().some((message) => (
+      message.type === "SET_EXTENSION_STORAGE"
+      && message.values?.fp_rules?.some((rule) => (
+        rule.id === "rule_login"
+        && rule.ruleType === "flow"
+        && rule.execution?.delayMs === 175
+        && rule.steps?.[0]?.required === true
+        && rule.steps?.[0]?.runtime?.verifyAfterFill === false
+        && rule.steps?.[0]?.selector?.strategy === "css"
+        && rule.steps?.[0]?.selector?.confidence === 92
+        && rule.steps?.[0]?.element?.type === "email"
+        && rule.steps?.[0]?.meta?.path === "/login"
+      ))
+    ))
+  ));
   await optionsPage.locator('.nav-item[data-panel="scripts-panel"]').click();
   await optionsPage.waitForSelector("#scripts-panel.active");
   await captureSnapshot(optionsPage, "options-userscripts");

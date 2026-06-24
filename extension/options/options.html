@@ -227,10 +227,9 @@
                 <h3>Rule Editor</h3>
                 <button class="secondary-btn" id="rule-back-btn">Back</button>
               </div>
-              <div class="editor-grid">
+              <div class="editor-grid rule-basics-grid">
                 <input type="hidden" id="rule-id">
                 <label>Name<input id="rule-name" type="text" autocomplete="off"></label>
-                <label>Domain Match<input id="rule-domain" type="text" placeholder="example.com" autocomplete="off"></label>
                 <label>Profile
                   <select id="rule-profile-id">
                     <option value="default">Global</option>
@@ -242,6 +241,56 @@
                   </div>
                   <label class="switch">
                     <input id="rule-enabled" type="checkbox">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="rule-match-grid">
+                <label>Match Mode
+                  <select id="rule-match-mode">
+                    <option value="domain">Domain</option>
+                    <option value="domainPath">Domain + Path</option>
+                    <option value="fullUrl">Exact URL</option>
+                    <option value="path">Path Pattern</option>
+                    <option value="url_prefix">URL Prefix</option>
+                    <option value="url_pattern">URL Pattern</option>
+                    <option value="regex">Regular Expression</option>
+                  </select>
+                </label>
+                <label>Match Pattern<input id="rule-domain" type="text" placeholder="example.com" autocomplete="off"></label>
+                <label>Path Filter<input id="rule-path" type="text" placeholder="Optional, e.g. /checkout/*" autocomplete="off"></label>
+              </div>
+            </section>
+
+            <section class="surface">
+              <div class="section-head">
+                <h3>Execution Behavior</h3>
+              </div>
+              <div class="rule-mode-control" role="radiogroup" aria-label="Execution mode">
+                <label class="rule-mode-option">
+                  <input id="rule-mode-instant" type="radio" name="rule-mode" value="instant">
+                  <span>Instant</span>
+                </label>
+                <label class="rule-mode-option">
+                  <input id="rule-mode-flow" type="radio" name="rule-mode" value="flow">
+                  <span>Step-by-step</span>
+                </label>
+              </div>
+              <div class="rule-execution-grid">
+                <label>Step Delay (ms)<input id="rule-delay-ms" type="number" min="0" max="5000" step="10"></label>
+                <label>Element Timeout (ms)<input id="rule-timeout-ms" type="number" min="0" max="60000" step="100"></label>
+                <label>Priority<input id="rule-priority" type="number" min="0" max="10000" step="1"></label>
+                <div class="setting-row rule-execution-switch">
+                  <div class="setting-info"><span class="setting-title">Run Once Per Page</span></div>
+                  <label class="switch">
+                    <input id="rule-run-once" type="checkbox">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="setting-row rule-execution-switch">
+                  <div class="setting-info"><span class="setting-title">Stop On Error</span></div>
+                  <label class="switch">
+                    <input id="rule-stop-on-error" type="checkbox">
                     <span class="slider"></span>
                   </label>
                 </div>
@@ -264,7 +313,7 @@
                       <th class="col-type">Type</th>
                       <th>Name / Selector</th>
                       <th>Value</th>
-                      <th class="col-site">Site Match</th>
+                      <th class="col-site">Step</th>
                       <th class="col-actions">Actions</th>
                     </tr>
                   </thead>
