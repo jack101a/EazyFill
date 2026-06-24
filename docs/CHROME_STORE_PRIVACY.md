@@ -20,17 +20,18 @@ EazyFill provides user-controlled browser assistance for configured CAPTCHA fiel
 
 EazyFill can process:
 
-- Email address or mobile number used for registration.
-- Optional account name.
-- API keys, key status, plan, subscription, and credit state.
+- Email address used for sign-in and registration.
+- Required account name for new accounts.
+- One-time verification code challenge state.
+- Session token, sync secret, account status, plan, subscription, and credit state.
 - A randomly generated installation/device identifier.
 - Device name, user-agent metadata, first/last-seen timestamps, and device status.
 
-The extension stores the API-key record in protected local extension storage. The generated device identifier is stored in local extension storage and sent with authenticated service requests. The service stores key/device associations for access control, device limits, support, and abuse prevention.
+The extension stores the account/session record in protected local extension storage. The generated device identifier is stored in local extension storage and sent with authenticated service requests. The service stores account/session/device associations for access control, device limits, support, and abuse prevention.
 
 ### User-Created Rules, Scripts, Profiles, Selectors, and Settings
 
-The extension stores user-created form rules, userscripts, profiles, CAPTCHA selectors, settings, credit state, and sync metadata in browser extension storage. API keys, rules, scripts, profiles, and supported userscript storage records use the extension's protected local storage layer; not every local setting or metadata field is encrypted.
+The extension stores user-created form rules, userscripts, profiles, CAPTCHA selectors, settings, credit state, and sync metadata in browser extension storage. Account/session records, rules, scripts, profiles, and supported userscript storage records use the extension's protected local storage layer; not every local setting or metadata field is encrypted.
 
 This content is used to provide the actions the user configures. Page changes, unsupported frames, browser restrictions, or invalid selectors can prevent an action from working.
 
@@ -44,10 +45,10 @@ When the user invokes sync, EazyFill creates a payload containing:
 - Userscripts.
 - Profiles.
 - CAPTCHA selectors.
-- Settings, excluding an `apiKey` field.
+- Settings, excluding session/authentication fields.
 - Sync version metadata.
 
-The extension encrypts that payload before upload using AES-GCM with key material derived from the API key and generated device identifier. The service stores the encrypted blob and operational metadata including the device identifier, version, blob hash, blob size, and timestamps. The service implementation does not receive the plaintext sync payload, but loss or change of the required key/device context can prevent decryption.
+The extension encrypts that payload before upload using AES-GCM with key material derived from the session/sync secret and generated device identifier. The service stores the encrypted blob and operational metadata including the device identifier, version, blob hash, blob size, and timestamps. The service implementation does not receive the plaintext sync payload, but loss or change of the required account/session/device context can prevent decryption.
 
 Users can request deletion of the cloud sync blob through the extension. The final policy must state the production deletion and backup-retention timing.
 
@@ -58,7 +59,7 @@ For configured CAPTCHA assistance, EazyFill can read the user-selected source el
 - The selected CAPTCHA image encoded for transport, or selected text.
 - The current website domain.
 - Image dimensions or related request metadata.
-- API key and generated device identifier in request headers.
+- Session/account authentication and generated device identifier in request headers.
 
 The CAPTCHA payload can be processed transiently by the API, an in-process or remote queue, solver workers, and a duplicate-result cache keyed from a hash of the request. Operational usage records can include task type, status, processing time, model identifier, domain, account/key association, IP address, and timestamps.
 
@@ -94,8 +95,8 @@ Data can be disclosed to service providers only as needed to provide hosting, CA
 
 ## Chrome Web Store Disclosure Checklist
 
-- [ ] Personally identifiable information: disclose registration email/mobile and optional name.
-- [ ] Authentication information: disclose API keys and verification state.
+- [ ] Personally identifiable information: disclose registration/sign-in email and required account name for new accounts.
+- [ ] Authentication information: disclose OTP challenge state, session/account state, and sync secret handling.
 - [ ] Device information: disclose generated device identifier, device metadata, and user agent.
 - [ ] Financial/payment information: disclose purchase, subscription, amount, status, and provider transaction records; explain provider handling of payment instruments.
 - [ ] Web browsing activity: disclose current-domain processing tied to configured feature use; do not claim collection of a general browsing-history list.

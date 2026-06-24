@@ -18,7 +18,7 @@ User-controlled CAPTCHA assistance, reusable form-filling rules, and userscript 
 
 EazyFill helps users with repetitive browser tasks through three user-controlled tools in one Manifest V3 extension: configured CAPTCHA assistance, reusable form-filling rules, and a userscript manager that uses the browser's User Scripts API where supported.
 
-Users choose the sites, selectors, rules, profiles, settings, and scripts involved. Rules, scripts, profiles, CAPTCHA selectors, and settings are stored in the browser. Optional cloud sync encrypts that selected extension data before upload. The service backend verifies accounts and API keys, tracks devices and credits, processes requested CAPTCHA content, and supports billing records.
+Users choose the sites, selectors, rules, profiles, settings, and scripts involved. Rules, scripts, profiles, CAPTCHA selectors, and settings are stored in the browser. Optional cloud sync encrypts that selected extension data before upload. The service backend verifies email-based accounts, sessions, devices, plans, and credits, processes requested CAPTCHA content, and supports billing records.
 
 Core features:
 
@@ -33,8 +33,8 @@ EazyFill assists with user-selected actions; it does not guarantee that a page, 
 
 ## Privacy Summary
 
-- Account access may process an email address or mobile number, optional name, API key, and generated device identifier.
-- API keys, rules, scripts, and profiles use protected local extension storage. Other settings, CAPTCHA selectors, sync metadata, and the generated device identifier are also stored locally.
+- Account access processes an email address, required account name for new accounts, one-time verification code state, session token, sync secret, and generated device identifier.
+- Session/account records, rules, scripts, and profiles use protected local extension storage. Other settings, CAPTCHA selectors, sync metadata, and the generated device identifier are also stored locally.
 - Optional sync uploads an encrypted blob containing rules, scripts, profiles, CAPTCHA selectors, and settings. The service also receives sync metadata such as device identifier, blob size, version, hash, and timestamps.
 - A requested CAPTCHA solve sends the selected image or text, the current domain, and related request metadata to the service. Usage and security records can include task type, status, timing, model, domain, device/account association, and network metadata.
 - Billing records can include plan, amount, currency, status, and provider transaction identifiers. Payment credentials such as card, UPI, or wallet details are handled by the payment provider, not by the extension.
@@ -61,6 +61,6 @@ Required Chrome Web Store image tasks:
 - Manifest V3 service worker architecture is used.
 - User-managed scripts are registered through the browser User Scripts API.
 - Broad host permissions support rules, scripts, selectors, and assistance on sites chosen by the user.
-- `clipboardWrite` and `downloads` are optional and requested for user-triggered helpers or exports.
+- `downloads` supports user-triggered backup exports. `clipboardWrite` is optional and used only for user-triggered script helper actions.
 - Chrome users must enable the browser's `Allow User Scripts` setting before managed scripts can run.
 - Firefox packaging exists, but Firefox installation and feature behavior remain manual QA blockers.

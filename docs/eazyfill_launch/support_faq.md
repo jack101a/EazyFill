@@ -4,19 +4,19 @@ Public support contact: **TBD - pre-publication blocker**
 
 Do not publish the extension until an approved support channel is available.
 
-## API Keys and Account Access
+## Account Access
 
-### Where do I enter an API key?
+### How do I sign in?
 
-Open the EazyFill popup and connect with an issued API key. Current EazyFill keys use the `fp_` prefix. The extension verifies the key with the configured service and stores the authenticated record in protected local extension storage.
+Open the EazyFill popup and choose **Sign in / Sign up**. Enter your supported email address. Existing accounts receive a verification code. New accounts are asked for a name, then receive a verification code. After verification, the extension stores an account/session record in protected local extension storage.
 
-### What should I do if a key is invalid, expired, or revoked?
+### What should I do if sign-in fails?
 
-Confirm that the full key was entered without added spaces and that the extension is using the intended service environment. If the key was revoked, expired, rotated, or assigned to too many devices, use an approved account or support process to obtain or manage a valid key. Never send a full API key in screenshots or public support posts.
+Confirm that the email address is typed correctly, uses a supported provider, and that the verification code has not expired. If the account is blocked, expired, assigned to too many devices, or cannot receive email, use the approved support process once it is published. Never share a verification code or session details in screenshots or public support posts.
 
 ### What is the device identifier?
 
-EazyFill creates a random identifier for the installation and sends it with authenticated requests. The service can associate it with the API key for device management, limits, support, and abuse prevention. Removing a device from the account can require reconnecting that installation.
+EazyFill creates a random identifier for the installation and sends it with authenticated requests. The service can associate it with the account/session for device management, limits, support, and abuse prevention. Removing a device from the account can require signing in again on that installation.
 
 ## Credits and Quotas
 
@@ -26,7 +26,7 @@ CAPTCHA requests are metered against the account's configured allowance. The ser
 
 ### Why is the displayed balance unavailable or out of date?
 
-The extension caches recent credit state and refreshes it from the service. Check the connection, refresh credits from the popup or options page, and verify that the API key is valid. Plan limits and reset timing come from the service and can differ by account.
+The extension caches recent credit state and refreshes it from the service. Check the connection, refresh credits from the popup or options page, and verify that the account is signed in. Plan limits and reset timing come from the service and can differ by account.
 
 ## CAPTCHA Selector Setup
 
@@ -43,7 +43,7 @@ Use the selector picker where possible, save the configuration, and test it on a
 
 ### Why does the picker or solve action not find the CAPTCHA?
 
-Common causes include an incorrect domain, a changed selector, a CAPTCHA inside an unsupported frame, a cross-origin image that cannot be read, a canvas or element type the detector does not support, a disabled module, an invalid API key, no remaining credits, or a site that blocks extension behavior. The selector picker also times out if no element is chosen.
+Common causes include an incorrect domain, a changed selector, a CAPTCHA inside an unsupported frame, a cross-origin image that cannot be read, a canvas or element type the detector does not support, a disabled module, a signed-out or expired account, no remaining credits, or a site that blocks extension behavior. The selector picker also times out if no element is chosen.
 
 ### Does EazyFill bypass every CAPTCHA?
 
@@ -65,11 +65,11 @@ Imported scripts can access page content permitted by their match patterns and s
 
 ### What does encrypted sync include?
 
-An invoked sync includes rules, scripts, profiles, CAPTCHA selectors, and settings. The API key field is excluded from the payload. Encryption happens in the extension before upload; the service stores the encrypted blob and metadata.
+An invoked sync includes rules, scripts, profiles, CAPTCHA selectors, and settings. Authentication/session fields are excluded from the payload. Encryption happens in the extension before upload; the service stores the encrypted blob and metadata.
 
 ### Why can another installation not decrypt a backup?
 
-The sync key is derived from the API key and generated device identifier. A different, rotated, or lost key/device context can make the blob unreadable. Keep an exported local backup before rotating credentials or replacing an installation. Cloud sync is optional and can be deleted from the extension.
+The sync key is derived from account/session sync material and the generated device identifier. A different, rotated, or lost account/device context can make the blob unreadable. Keep an exported local backup before replacing an installation. Cloud sync is optional and can be deleted from the extension.
 
 ## Billing
 

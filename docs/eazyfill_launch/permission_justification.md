@@ -6,7 +6,7 @@ Use this draft when completing browser store permission and privacy fields. Rech
 
 `activeTab`: Supports user-invoked actions on the current tab, including selector picking, CAPTCHA assistance, recording, and form-filling playback.
 
-`storage`: Stores extension settings, the protected API-key record, rules, scripts, profiles, CAPTCHA selectors, credit state, and sync metadata in browser extension storage.
+`storage`: Stores extension settings, the protected account/session record, rules, scripts, profiles, CAPTCHA selectors, credit state, and sync metadata in browser extension storage.
 
 `unlimitedStorage`: Allows larger user-created script, profile, rule, and backup collections to remain local without relying on server storage.
 
@@ -18,9 +18,11 @@ Use this draft when completing browser store permission and privacy fields. Rech
 
 `userScripts`: Registers scripts that the user creates, imports, enables, or disables through the browser's User Scripts API. Chrome also requires the user to enable `Allow User Scripts`.
 
-## Optional Permissions
+`downloads`: Saves user-triggered local backup exports from the extension.
 
-`downloads`: Requested for user-triggered exports of backups, rules, scripts, profiles, or diagnostics.
+`webNavigation`: Detects navigation to `.user.js` install URLs so EazyFill can open its own userscript import flow for the user.
+
+## Optional Permissions
 
 `clipboardWrite`: Requested for user-triggered script helpers such as `GM_setClipboard`.
 
@@ -30,9 +32,9 @@ Use this draft when completing browser store permission and privacy fields. Rech
 
 ## Chrome Web Store Data Disclosure Draft
 
-- Personally identifiable information: **Yes.** Registration can process an email address or mobile number and an optional name.
-- Authentication information: **Yes.** API keys and account verification state are processed; the API key is stored in protected local extension storage and sent to the service for authenticated requests.
-- Device information: **Yes.** A generated installation/device identifier and user-agent metadata can be associated with an API key for device management and abuse prevention.
+- Personally identifiable information: **Yes.** Registration and sign-in process an email address and a required account name for new accounts.
+- Authentication information: **Yes.** One-time verification code state, session tokens, account status, and sync secrets are processed. Session/account data is stored in protected local extension storage and sent to the service for authenticated requests.
+- Device information: **Yes.** A generated installation/device identifier and user-agent metadata can be associated with an account/session for device management, limits, support, and abuse prevention.
 - Financial and payment information: **Yes, limited.** EazyFill stores plan, amount, currency, payment status, and provider transaction identifiers. Payment instruments and checkout credentials are handled by the selected payment provider.
 - Web browsing activity: **Yes, limited to feature use.** The current domain can be sent with requested CAPTCHA operations and recorded with usage/security events. EazyFill does not build a general list of browsing history for advertising.
 - Website content: **Yes.** User-selected CAPTCHA images or text and related page metadata are sent for requested solves. User-selected element selectors and captured form steps are processed locally and can be included in optional encrypted sync.
@@ -42,7 +44,7 @@ Use this draft when completing browser store permission and privacy fields. Rech
 ## Data Handling Commitments
 
 - Optional sync encrypts rules, scripts, profiles, CAPTCHA selectors, and settings in the extension before upload. The service stores the encrypted blob plus device, version, size, hash, and timestamp metadata.
-- API keys are excluded from the sync payload, although the key and device identifier are used locally to derive the sync encryption key.
+- Session tokens are excluded from the sync payload, although session/sync key material and the generated device identifier are used locally to derive sync encryption keys.
 - CAPTCHA images or text are sent only when the user invokes or enables the configured assistance flow. They may be processed transiently by the API, queue, worker, and in-memory duplicate-result cache.
 - Billing uses Razorpay-backed order creation, signed payment verification, and webhook reconciliation.
 - EazyFill does not sell user data or use it to build advertising profiles.
