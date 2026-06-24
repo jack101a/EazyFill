@@ -300,11 +300,6 @@ function preferredBillingProvider(item = {}) {
   return "razorpay";
 }
 
-function billingProviderLabel(code) {
-  const provider = state.paymentProviders.find((item) => String(item.code || "").toLowerCase() === code);
-  return provider?.name || (code === "razorpay" ? "Razorpay" : code);
-}
-
 function openExternalBillingUrl(url) {
   const target = String(url || "").trim();
   if (!target) return false;
@@ -2726,7 +2721,7 @@ function renderBilling() {
     button.textContent = isCurrent
       ? "Current Plan"
       : authenticated
-        ? `Continue with ${billingProviderLabel(billingProvider)}`
+        ? "Pay"
         : "Sign In First";
     if (!isCurrent) {
       button.addEventListener("click", () => {
@@ -2773,7 +2768,7 @@ function renderBilling() {
 
     const button = document.createElement("button");
     button.className = "secondary-btn buy-pack-btn";
-    button.textContent = authenticated ? `Buy with ${billingProviderLabel(billingProvider)}` : "Sign In First";
+    button.textContent = authenticated ? "Pay" : "Sign In First";
     button.addEventListener("click", () => {
       if (!authenticated) {
         focusAccountSignup();
