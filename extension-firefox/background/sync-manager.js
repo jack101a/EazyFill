@@ -118,6 +118,23 @@ export function createSyncManager({ apiClient }) {
 
   async function deleteCloudCopy() {
     const response = await apiClient.delete("/v2/sync/delete");
+    return applyCloudDelete(response);
+  }
+
+  async function requestDeleteOtp() {
+    const response = await apiClient.post("/v2/sync/delete/request-otp", {});
+    return { ok: true, ...response };
+  }
+
+  async function confirmDeleteCloudCopy({ challengeId = "", challenge_id = "", otp = "" } = {}) {
+    const response = await apiClient.post("/v2/sync/delete/confirm", {
+      challenge_id: challengeId || challenge_id,
+      otp
+    });
+    return applyCloudDelete(response);
+  }
+
+  async function applyCloudDelete(response) {
     const data = await getExtensionStorage(["fp_sync_meta"]);
     await setExtensionStorage({
       fp_sync_meta: {
@@ -134,6 +151,8 @@ export function createSyncManager({ apiClient }) {
     push,
     pull,
     status,
-    deleteCloudCopy
+    deleteCloudCopy,
+    requestDeleteOtp,
+    confirmDeleteCloudCopy
   };
 }

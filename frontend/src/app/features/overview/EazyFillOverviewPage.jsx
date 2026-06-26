@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   CreditCard,
   Gauge,
-  KeyRound,
   RefreshCw,
   Smartphone,
   Users,
@@ -97,12 +96,12 @@ export function EazyFillOverviewPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
             <Metric label="Users" value={formatCount(data.users?.total)} detail={`${formatCount(data.users?.active)} active, ${formatCount(data.users?.blocked)} blocked`} icon={Users} />
             <Metric label="Subscriptions" value={formatCount(data.subscriptions?.active)} detail="Active product subscriptions" icon={CreditCard} tone="text-emerald-400" />
-            <Metric label="API keys" value={formatCount(data.keys?.active)} detail={`${formatCount(data.keys?.active_devices)} active devices`} icon={KeyRound} tone="text-amber-400" />
+            <Metric label="Device sessions" value={formatCount(data.keys?.active)} detail={`${formatCount(data.keys?.active_devices)} active devices`} icon={Smartphone} tone="text-amber-400" />
             <Metric label="Revenue" value={formatMoney(data.billing?.approved_revenue)} detail={`${formatCount(data.billing?.pending_payments)} pending payments`} icon={CreditCard} tone="text-emerald-400" />
             <Metric label="Usage" value={`${formatCount(usageUsed)} / ${formatCount(usageLimit)}`} detail={`${usagePercent}% of allocated credits consumed`} icon={Gauge} tone="text-sky-400" />
             <Metric label="Quota risk" value={formatCount(data.usage?.quota_risk_users)} detail="Users at or beyond current limit" icon={AlertTriangle} tone="text-rose-400" />
             <Metric label="Webhook failures" value={formatCount(data.billing?.webhook_failures_7d)} detail="Razorpay failures in the last 7 days" icon={AlertTriangle} tone="text-orange-400" />
-            <Metric label="Devices" value={formatCount(data.keys?.active_devices)} detail="Devices bound to active user keys" icon={Smartphone} tone="text-violet-400" />
+            <Metric label="Devices" value={formatCount(data.keys?.active_devices)} detail="Active signed-in devices" icon={Smartphone} tone="text-violet-400" />
           </div>
         </section>
       )}
@@ -117,7 +116,7 @@ export function EazyFillOverviewPage() {
         </div>
         <div className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0 divide-white/[0.07]">
           <Metric label="Quota exhausted" value={formatCount(risk.quota_exhausted?.length)} detail="Current result window" icon={Gauge} tone="text-rose-400" />
-          <Metric label="Multi-device keys" value={formatCount(risk.multi_device_keys?.length)} detail="Keys seen on multiple active devices" icon={Smartphone} tone="text-amber-400" />
+          <Metric label="Multi-device sessions" value={formatCount(risk.multi_device_keys?.length)} detail="Accounts seen on multiple active devices" icon={Smartphone} tone="text-amber-400" />
           <Metric label="Failed webhooks" value={formatCount(risk.failed_webhooks?.length)} detail={`${formatCount(riskCount)} combined signals`} icon={AlertTriangle} tone="text-orange-400" />
         </div>
       </section>

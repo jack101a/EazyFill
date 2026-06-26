@@ -66,6 +66,7 @@
             </div>
             <button class="secondary-btn" data-jump="account-panel" type="button">Account & Plan</button>
           </div>
+          <div class="runtime-alert is-hidden" id="overview-userscript-alert" role="status" aria-live="polite"></div>
           <div class="overview-grid">
             <div class="overview-card hero-card credits-hero">
               <div class="card-header">
@@ -426,7 +427,7 @@
               <input id="script-import-url-input" type="url" placeholder="Paste GreasyFork or .user.js URL" autocomplete="off">
               <button class="secondary-btn" id="script-import-direct-btn">Import Script</button>
             </div>
-            <div class="config-status" id="script-runtime-status" role="status"></div>
+            <div class="runtime-alert compact" id="script-runtime-status" role="status" aria-live="polite"></div>
           </section>
           <section class="surface userscript-install-review is-hidden" id="script-install-review-card">
             <div class="admin-panel-head">
@@ -656,8 +657,8 @@
               </div>
               <div class="setting-row" id="sync-panel-anchor">
                 <div class="setting-info">
-                  <span class="setting-title">Cloud Synchronization</span>
-                  <span class="setting-desc">Allow sync actions from the dedicated Sync page</span>
+                  <span class="setting-title">Auto Sync</span>
+                  <span class="setting-desc">Automatically keep supported devices synchronized in the background</span>
                 </div>
                 <label class="switch">
                   <input id="setting-sync" type="checkbox">
@@ -816,10 +817,32 @@
                 <dd id="sync-size" class="stat-value">0 B</dd>
               </div>
             </dl>
+            <div class="setting-row sync-auto-row">
+              <div class="setting-info">
+                <span class="setting-title">Auto Sync</span>
+                <span class="setting-desc">Push local changes automatically and keep this browser ready for multi-device sync</span>
+              </div>
+              <label class="switch">
+                <input id="sync-auto-toggle" type="checkbox">
+                <span class="slider"></span>
+              </label>
+            </div>
             <div class="action-row">
               <button class="secondary-btn" id="sync-push-btn">Push</button>
               <button class="secondary-btn" id="sync-pull-btn">Pull</button>
               <button class="danger-btn" id="sync-delete-btn">Delete Cloud Copy</button>
+            </div>
+            <div class="sync-delete-confirm is-hidden" id="sync-delete-confirm">
+              <div class="setting-info">
+                <span class="setting-title">Confirm cloud delete</span>
+                <span class="setting-desc">Enter the email OTP to permanently delete this account's cloud sync copy.</span>
+              </div>
+              <div class="otp-actions">
+                <input id="sync-delete-otp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code">
+                <button class="danger-btn otp-action-button" id="sync-delete-confirm-btn">Confirm Delete</button>
+                <button class="secondary-btn otp-action-button" id="sync-delete-cancel-btn">Cancel</button>
+              </div>
+              <p class="inline-message is-neutral" id="sync-delete-message"></p>
             </div>
           </section>
 
@@ -832,6 +855,13 @@
               </div>
             </div>
             <p class="local-backup-copy" id="local-backup-status">Export EazyFill data or import shared data into a new profile.</p>
+            <div class="factory-reset-row">
+              <div class="setting-info">
+                <span class="setting-title">Factory Reset Local Data</span>
+                <span class="setting-desc">Clear this browser's local EazyFill data only. Cloud sync data is not deleted.</span>
+              </div>
+              <button class="danger-btn" id="factory-reset-local-btn" type="button">Factory Reset</button>
+            </div>
           </section>
         </section>
       </div>

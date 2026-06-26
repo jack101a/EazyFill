@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v2_routes import router
+from app.api.v2_routes import sync as sync_route
 from app.api.v2_routes.deps import V2AuthContext, validate_v2_key
 
 
@@ -18,7 +19,7 @@ def _ctx() -> V2AuthContext:
         device_id="device-1",
         record={"id": 7, "user_id": 42, "name": "Main Key", "expires_at": None},
         key_kind="user",
-        user=SimpleNamespace(id=42, full_name="Flow User", mobile_number="9999999999"),
+        user=SimpleNamespace(id=42, full_name="Flow User", mobile_number="9999999999", email="flowuser@gmail.com"),
         subscription=SimpleNamespace(id=3),
         plan=SimpleNamespace(
             code="basic",
@@ -775,6 +776,62 @@ def test_v2_sync_requires_sync_entitlement():
 
     assert response.status_code == 403
     app.state.container.sync_service.status.assert_not_called()
+
+
+def test_v2_sync_delete_requires_email_otp():
+    app = _app()
+
+    response = TestClient(app).delete("/v2/sync/delete", headers={"X-Api-Key": "fp_test"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "otp_required"
+    app.state.container.sync_service.delete_blob.assert_not_called()
+
+
+def test_v2_sync_delete_request_sends_email_otp(monkeypatch):
+    app = _app()
+
+    async def fake_send_challenge(_request, *, email, name, plan_code, account_mode):
+        return {
+            "ok": True,
+            "challenge_id": "challenge-delete",
+            "email": email,
+            "account_mode": account_mode,
+        }
+
+    monkeypatch.setattr(sync_route.account_auth_service, "send_action_otp", fake_send_challenge)
+
+    response = TestClient(app).post("/v2/sync/delete/request-otp", headers={"X-Api-Key": "fp_test"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["challenge_id"] == "challenge-delete"
+    assert body["email"] == "flowuser@gmail.com"
+    assert body["account_mode"] == "sync_delete"
+
+
+def test_v2_sync_delete_confirm_verifies_otp_before_delete(monkeypatch):
+    app = _app()
+    app.state.container.sync_service.delete_blob.return_value = {"deleted": True}
+    verify_action_otp = MagicMock(return_value={"ok": True})
+    monkeypatch.setattr(sync_route.account_auth_service, "verify_action_otp", verify_action_otp)
+    monkeypatch.setattr(sync_route, "_sync_delete_challenge_belongs_to_user", lambda *_args, **_kwargs: True)
+
+    response = TestClient(app).post(
+        "/v2/sync/delete/confirm",
+        headers={"X-Api-Key": "fp_test"},
+        json={"challenge_id": "challenge-delete", "otp": "123456"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    verify_action_otp.assert_called_once_with(
+        challenge_id="challenge-delete",
+        otp="123456",
+        account_mode="sync_delete",
+        email="flowuser@gmail.com",
+    )
+    app.state.container.sync_service.delete_blob.assert_called_once_with(42)
 
 
 def test_v2_plans_returns_catalog():

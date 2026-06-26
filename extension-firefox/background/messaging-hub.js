@@ -1,4 +1,4 @@
-import { getExtensionStorage, setExtensionStorage } from "./protected-storage.js";
+import { factoryResetLocalExtensionStorage, getExtensionStorage, setExtensionStorage } from "./protected-storage.js";
 import { getUserscriptRuntimeStatus, handleGMCall, parseUserscript, registerStoredUserscripts } from "./userscript-manager.js";
 
 const asyncHandlers = new Map();
@@ -558,6 +558,14 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     return ok();
   });
 
+  registerMessageHandler("FACTORY_RESET_LOCAL", async (_message, sender) => {
+    if (senderKind(sender) !== "ui") {
+      throw new Error("Factory reset denied: only the EazyFill popup or options page can reset local data");
+    }
+    await factoryResetLocalExtensionStorage();
+    return ok();
+  });
+
   registerMessageHandler("GM_API_CALL", (message) => handleGMCall(message));
 
   registerMessageHandler("USERSCRIPTS_STATUS", () => getUserscriptRuntimeStatus());
@@ -789,6 +797,8 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     registerMessageHandler("SYNC_PUSH", () => syncManager.push());
     registerMessageHandler("SYNC_PULL", () => syncManager.pull());
     registerMessageHandler("SYNC_DELETE", () => syncManager.deleteCloudCopy());
+    registerMessageHandler("SYNC_DELETE_OTP_START", () => syncManager.requestDeleteOtp());
+    registerMessageHandler("SYNC_DELETE_CONFIRM", (message) => syncManager.confirmDeleteCloudCopy(message.payload || {}));
   }
 }
 

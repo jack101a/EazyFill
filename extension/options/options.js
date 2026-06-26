@@ -39,6 +39,7 @@ const state = {
   usageHistory: [],
   userscriptStatus: {},
   pendingScriptInstall: null,
+  syncDeleteChallengeId: "",
   selectedRuleId: null,
   selectedScriptId: null,
   selectedProfileId: null,
@@ -315,6 +316,60 @@ function openExternalBillingUrl(url) {
     return Boolean(window.open(target, "_blank", "noopener,noreferrer"));
   } catch (_) {
     return false;
+  }
+}
+
+function chromeMajorVersion() {
+  return Number(navigator.userAgent.match(/(?:Chrome|Chromium)\/([0-9]+)/)?.[1] || 0);
+}
+
+function userscriptSetupMode(status = state.userscriptStatus || {}) {
+  const explicit = String(status.setupMode || "");
+  if (explicit) return explicit;
+  const version = Number(status.chromeVersion || chromeMajorVersion() || 0);
+  return version >= 138 ? "allow_user_scripts" : "developer_mode";
+}
+
+function userscriptSetupTitle(status = state.userscriptStatus || {}) {
+  if (status.authRequired) return "Sign in to run userscripts";
+  if (userscriptSetupMode(status) === "allow_user_scripts") return "Allow User Scripts is off";
+  return "Developer mode is required";
+}
+
+function userscriptSetupMessage(status = state.userscriptStatus || {}) {
+  if (status.authRequired) return "Saved scripts stay local until your EazyFill account is connected.";
+  if (userscriptSetupMode(status) === "allow_user_scripts") {
+    return "Chrome requires this extension-level toggle before EazyFill can register userscripts.";
+  }
+  return "This Chrome version requires Developer mode before EazyFill can register userscripts.";
+}
+
+function userscriptSetupUrl(status = state.userscriptStatus || {}) {
+  const extensionId = globalThis.chrome?.runtime?.id || "";
+  const defaultUrl = extensionId ? `chrome://extensions/?id=${extensionId}` : "chrome://extensions";
+  return String(status.detailsUrl || status.helpUrl || defaultUrl);
+}
+
+async function openUserscriptSetupPage(status = state.userscriptStatus || {}) {
+  const url = userscriptSetupUrl(status);
+  if (!url) return;
+  try {
+    if (!globalThis.chrome?.tabs?.create) throw new Error("Tabs API unavailable");
+    await new Promise((resolve, reject) => {
+      chrome.tabs.create({ url }, () => {
+        const message = chrome.runtime?.lastError?.message;
+        if (message) reject(new Error(message));
+        else resolve();
+      });
+    });
+    toast("Opened Chrome extension settings", "info");
+  } catch (error) {
+    try {
+      await navigator.clipboard?.writeText(url);
+      toast("Chrome blocked opening the settings page, so the URL was copied.", "warning");
+    } catch (_) {
+      toast(`Open ${url}`, "warning");
+    }
   }
 }
 
@@ -726,7 +781,6 @@ function renderStatus() {
   const credits = normalizeCredits(state.credits);
   const authenticated = isAuthenticated();
   const syncAvailable = authenticated && planAllowsSync(state.auth.plan);
-  const syncEnabled = syncAvailable && !!state.settings.syncEnabled;
   const packExportAvailable = authenticated && planAllowsPortablePack("export");
   const packImportAvailable = authenticated && planAllowsPortablePack("import");
   setText("connection-label", authenticated ? "Connected" : "Disconnected");
@@ -736,7 +790,7 @@ function renderStatus() {
   setText("captcha-used", credits.used || 0);
   setText("captcha-limit", credits.limit || 0);
   setText("captcha-reset", formatDate(credits.resetsAt));
-  setText("sync-status", !authenticated ? "Disconnected" : !syncAvailable ? "Plan locked" : state.settings.syncEnabled ? "On" : "Off");
+  setText("sync-status", !authenticated ? "Disconnected" : !syncAvailable ? "Plan locked" : state.settings.syncEnabled ? "Auto Sync On" : "Manual only");
   setText("sync-last", formatDate(state.syncMeta.lastSyncAt));
   setText("sync-size", formatBytes(state.syncMeta.blobSizeBytes));
   setText("account-user", state.auth.user?.mobile || state.auth.user?.email || "--");
@@ -781,7 +835,11 @@ function renderStatus() {
 
   for (const id of ["sync-refresh-btn", "sync-push-btn", "sync-pull-btn", "sync-delete-btn"]) {
     const button = $(id);
-    if (button) button.disabled = !syncAvailable || (id !== "sync-refresh-btn" && !syncEnabled);
+    if (button) button.disabled = !syncAvailable;
+  }
+  for (const id of ["sync-auto-toggle", "sync-delete-confirm-btn"]) {
+    const control = $(id);
+    if (control) control.disabled = !syncAvailable;
   }
   const exportBtn = $("backup-export-btn");
   const restoreBtn = $("backup-restore-btn");
@@ -814,10 +872,16 @@ function renderSettings() {
   setChecked("setting-autofill", state.settings.autofillEnabled !== false);
   setChecked("setting-userscripts", state.settings.userscriptsEnabled !== false);
   setChecked("setting-sync", !!state.settings.syncEnabled);
+  setChecked("sync-auto-toggle", !!state.settings.syncEnabled);
   const syncToggle = $("setting-sync");
   if (syncToggle) {
     const authenticated = isAuthenticated();
     syncToggle.disabled = !authenticated || !planAllowsSync(state.auth.plan);
+  }
+  const syncAutoToggle = $("sync-auto-toggle");
+  if (syncAutoToggle) {
+    const authenticated = isAuthenticated();
+    syncAutoToggle.disabled = !authenticated || !planAllowsSync(state.auth.plan);
   }
   setValue("setting-api-base", state.settings.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl);
   setValue("setting-theme", state.settings.theme || DEFAULT_SETTINGS.theme);
@@ -1169,7 +1233,7 @@ function ruleAccessSummary(rule) {
   const scope = rule?.access_scope || rule?.accessScope || "local";
   if (scope === "plan") return `Plans: ${compactListLabel(rule.plans || [], "none")}`;
   if (scope === "service") return `Services: ${compactListLabel(rule.services || [], "autofill")}`;
-  if (scope === "key") return `Keys: ${compactListLabel(rule.api_key_ids || rule.apiKeyIds || [], "none")}`;
+  if (scope === "key") return `Credentials: ${compactListLabel(rule.api_key_ids || rule.apiKeyIds || [], "none")}`;
   const profile = rule?.profileId || rule?.profile_id || rule?.profile_scope || "default";
   return scope === "local" ? `Profile: ${profile}` : scope;
 }
@@ -1666,28 +1730,102 @@ function renderScripts() {
 }
 
 function renderUserscriptStatus() {
-  const node = $("script-runtime-status");
-  if (!node) return;
+  renderUserscriptRuntimeAlert($("script-runtime-status"), { compact: true, overview: false });
+  renderUserscriptRuntimeAlert($("overview-userscript-alert"), { compact: false, overview: true });
+}
+
+function isUserscriptRuntimeReady(status = state.userscriptStatus || {}) {
+  return (status.available || status.ok) && !status.setupRequired;
+}
+
+function userscriptRuntimeInstructions(status = state.userscriptStatus || {}) {
+  if (Array.isArray(status.instructions) && status.instructions.length) return status.instructions;
+  return userscriptSetupMode(status) === "allow_user_scripts"
+    ? ["Open EazyFill extension details.", "Enable Allow User Scripts.", "Reload EazyFill."]
+    : ["Open chrome://extensions.", "Enable Developer mode.", "Reload EazyFill."];
+}
+
+function renderUserscriptRuntimeAlert(target, { compact = false, overview = false } = {}) {
+  const statusNode = target;
+  if (!statusNode) return;
   const status = state.userscriptStatus || {};
+  statusNode.replaceChildren();
+  statusNode.classList.toggle("compact", compact);
+
   if (!Object.keys(status).length) {
-    node.dataset.tone = "warning";
-    node.textContent = "Checking userscript runtime...";
+    if (overview) {
+      statusNode.classList.add("is-hidden");
+      return;
+    }
+    statusNode.classList.remove("is-hidden");
+    statusNode.dataset.tone = "warning";
+    statusNode.append(node("div", "runtime-alert-title", "Checking userscript runtime..."));
     return;
   }
+
   const count = status.registeredCount ?? status.count ?? 0;
+  if (isUserscriptRuntimeReady(status)) {
+    if (overview) {
+      statusNode.classList.add("is-hidden");
+      return;
+    }
+    statusNode.classList.remove("is-hidden");
+    statusNode.dataset.tone = status.disabled ? "warning" : "success";
+    const title = status.disabled ? "Userscripts are paused" : "Userscript runtime ready";
+    const body = status.disabled
+      ? "Turn on the Userscripts setting when you want saved scripts to run."
+      : `${count} script${count === 1 ? "" : "s"} registered for matching pages.`;
+    statusNode.append(node("div", "runtime-alert-title", title), node("div", "runtime-alert-body", body));
+    return;
+  }
+
   if (status.authRequired) {
-    node.dataset.tone = "warning";
-    node.textContent = "Sign in to activate saved EazyFill userscripts.";
+    if (overview) {
+      statusNode.classList.add("is-hidden");
+      return;
+    }
+    statusNode.classList.remove("is-hidden");
+    statusNode.dataset.tone = "warning";
+    statusNode.append(
+      node("div", "runtime-alert-title", userscriptSetupTitle(status)),
+      node("div", "runtime-alert-body", userscriptSetupMessage(status))
+    );
     return;
   }
-  if (status.available || status.ok) {
-    node.dataset.tone = "success";
-    node.textContent = `Chrome userScripts runtime ready. ${count} script${count === 1 ? "" : "s"} registered.`;
+
+  statusNode.classList.remove("is-hidden");
+  statusNode.dataset.tone = "danger";
+  const main = node("div", "runtime-alert-main");
+  main.append(
+    node("div", "runtime-alert-title", userscriptSetupTitle(status)),
+    node("div", "runtime-alert-body", userscriptSetupMessage(status))
+  );
+
+  const steps = node("ol", "runtime-alert-steps");
+  userscriptRuntimeInstructions(status).forEach((step) => {
+    const item = node("li", "runtime-alert-step", step);
+    steps.append(item);
+  });
+  main.append(steps);
+
+  const actions = node("div", "runtime-alert-actions");
+  const openLabel = userscriptSetupMode(status) === "allow_user_scripts"
+    ? "Open Extension Details"
+    : "Open Chrome Extensions";
+  const openButton = actionButton(openLabel, "icon-text-btn runtime-alert-button");
+  openButton.addEventListener("click", () => handle(() => openUserscriptSetupPage(status)));
+  actions.append(openButton);
+
+  const refreshButton = actionButton("Refresh Status", "icon-text-btn runtime-alert-button");
+  refreshButton.addEventListener("click", () => handle(() => refreshUserscriptStatus(), "Userscript status refreshed"));
+  actions.append(refreshButton);
+
+  statusNode.append(main, actions);
+  if (overview) {
+    statusNode.classList.add("overview-runtime-alert");
     return;
   }
-  node.dataset.tone = "warning";
-  const instructions = Array.isArray(status.instructions) ? ` ${status.instructions.join(" ")}` : "";
-  node.textContent = `${status.error || "Chrome userScripts runtime is not enabled."}${instructions}`;
+  statusNode.classList.remove("overview-runtime-alert");
 }
 
 function uniqueNonEmptyStrings(values = []) {
@@ -3161,7 +3299,12 @@ function readRuleSteps() {
   return steps;
 }
 
-async function saveSettings() {
+async function saveSettings(patch = {}) {
+  const syncControlValue = patch.syncEnabled !== undefined
+    ? !!patch.syncEnabled
+    : $("sync-auto-toggle")
+      ? !!$("sync-auto-toggle")?.checked
+      : !!$("setting-sync")?.checked;
   state.settings = {
     ...state.settings,
     activeProfileId: activeProfileId(),
@@ -3171,9 +3314,10 @@ async function saveSettings() {
     captchaLearningConsent: $("captcha-learning-consent")?.checked === true,
     autofillEnabled: $("setting-autofill")?.checked !== false,
     userscriptsEnabled: $("setting-userscripts")?.checked !== false,
-    syncEnabled: !!$("setting-sync")?.checked,
+    syncEnabled: syncControlValue,
     apiBaseUrl: $("setting-api-base")?.value.trim() || DEFAULT_SETTINGS.apiBaseUrl,
-    theme: $("setting-theme")?.value || DEFAULT_SETTINGS.theme
+    theme: $("setting-theme")?.value || DEFAULT_SETTINGS.theme,
+    ...patch
   };
   await setStorage({ fp_settings: state.settings });
   await sendMessage({ type: "CAPTCHA_CONFIG_UPDATED" }).catch(() => null);
@@ -3918,6 +4062,18 @@ async function restoreBackup(file) {
   toast(`Imported ${counts.rules} rules, ${counts.scripts} scripts, ${captchaImport.imported} CAPTCHA routes`, "success");
 }
 
+async function factoryResetLocalExtension() {
+  const phrase = window.prompt('Type "confirm" to factory reset local EazyFill data on this browser. Cloud data will not be deleted.');
+  if (phrase !== "confirm") {
+    toast("Factory reset cancelled", "info");
+    return;
+  }
+  const response = await sendMessage({ type: "FACTORY_RESET_LOCAL" });
+  if (!response.ok) throw new Error(response.error || "Local factory reset failed");
+  toast("Local EazyFill data cleared. Reloading...", "success");
+  setTimeout(() => window.location.reload(), 600);
+}
+
 async function refreshCredits() {
   const response = await sendMessage({ type: "CREDIT_REFRESH" });
   if (!response.ok) throw new Error(response.error || "Credit refresh failed");
@@ -4011,6 +4167,63 @@ async function runSync(type) {
   }
   if (type === "SYNC_PULL" && response.found) await loadState();
   else renderStatus();
+}
+
+function resetSyncDeleteOtp() {
+  state.syncDeleteChallengeId = "";
+  setHidden("sync-delete-confirm", true);
+  setValue("sync-delete-otp", "");
+  setInlineMessage($("sync-delete-message"), "", "neutral");
+}
+
+async function requestSyncDeleteOtp() {
+  const confirmed = window.confirm("Delete the encrypted cloud sync copy for this account? Local data on this browser will stay here.");
+  if (!confirmed) return;
+  const response = await sendMessage({ type: "SYNC_DELETE_OTP_START" });
+  if (!response.ok) throw new Error(response.error || "Could not send delete OTP");
+  state.syncDeleteChallengeId = response.challenge_id || response.challengeId || "";
+  if (!state.syncDeleteChallengeId) throw new Error("Could not start delete confirmation");
+  setHidden("sync-delete-confirm", false);
+  setInlineMessage($("sync-delete-message"), "Code sent. Check your account email before deleting the cloud copy.", "success");
+  $("sync-delete-otp")?.focus();
+}
+
+async function confirmSyncDeleteOtp() {
+  const otp = $("sync-delete-otp")?.value.trim() || "";
+  if (!state.syncDeleteChallengeId || !otp) {
+    setInlineMessage($("sync-delete-message"), "Enter the OTP sent to your email.", "error");
+    return;
+  }
+  const response = await sendMessage({
+    type: "SYNC_DELETE_CONFIRM",
+    payload: {
+      challengeId: state.syncDeleteChallengeId,
+      otp
+    }
+  });
+  if (!response.ok) throw new Error(response.error || "Cloud delete failed");
+  resetSyncDeleteOtp();
+  if (response.meta) state.syncMeta = response.meta;
+  else {
+    state.syncMeta = {
+      ...state.syncMeta,
+      lastSyncAt: Date.now(),
+      lastDirection: "delete",
+      blobSizeBytes: 0
+    };
+  }
+  renderStatus();
+}
+
+async function promptAutoSyncAfterLogin(surface = "options") {
+  if (!isAuthenticated() || !planAllowsSync(state.auth.plan) || state.settings.syncEnabled === true) return;
+  const accepted = window.confirm(
+    "Enable Auto Sync for multi-device synchronization? EazyFill will automatically push local rules, scripts, CAPTCHA routes, and profiles to your encrypted cloud copy."
+  );
+  if (!accepted) return;
+  await saveSettings({ syncEnabled: true });
+  await runSync("SYNC_PUSH").catch(() => null);
+  toast(surface === "popup" ? "Auto Sync enabled" : "Auto Sync enabled for this browser", "success");
 }
 
 const SELECTOR_PICK_TIMEOUT_MS = 30000;
@@ -4172,6 +4385,9 @@ async function loadState() {
   if (tab) {
     activatePanel(tab);
   }
+  if (installUrl || tab) {
+    history.replaceState({}, document.title, location.pathname);
+  }
 }
 
 function bind() {
@@ -4197,9 +4413,13 @@ function bind() {
   if (saveAllBtn) saveAllBtn.addEventListener("click", () => handle(saveSettings, "Saved"));
   $("settings-save-btn").addEventListener("click", () => handle(saveSettings, "Settings saved"));
   $("setting-theme").addEventListener("change", () => handle(saveSettings, "Theme saved"));
-  for (const id of ["setting-captcha", "setting-autofill", "setting-userscripts", "setting-sync"]) {
+  for (const id of ["setting-captcha", "setting-autofill", "setting-userscripts"]) {
     const el = $(id);
     if (el) el.addEventListener("change", () => handle(saveSettings, "Settings saved"));
+  }
+  for (const id of ["setting-sync", "sync-auto-toggle"]) {
+    const el = $(id);
+    if (el) el.addEventListener("change", (event) => handle(() => saveSettings({ syncEnabled: event.target.checked }), "Auto Sync saved"));
   }
 
   $("rule-new-btn").addEventListener("click", () => selectRule(null));
@@ -4289,9 +4509,12 @@ function bind() {
   $("sync-refresh-btn").addEventListener("click", () => handle(() => runSync("SYNC_STATUS"), "Sync refreshed"));
   $("sync-push-btn").addEventListener("click", () => handle(() => runSync("SYNC_PUSH"), "Sync pushed"));
   $("sync-pull-btn").addEventListener("click", () => handle(() => runSync("SYNC_PULL"), "Sync pulled"));
-  $("sync-delete-btn").addEventListener("click", () => handle(() => runSync("SYNC_DELETE"), "Cloud copy deleted"));
+  $("sync-delete-btn").addEventListener("click", () => handle(() => requestSyncDeleteOtp(), "Delete code sent"));
+  $("sync-delete-confirm-btn")?.addEventListener("click", () => handle(() => confirmSyncDeleteOtp(), "Cloud copy deleted"));
+  $("sync-delete-cancel-btn")?.addEventListener("click", resetSyncDeleteOtp);
   $("backup-export-btn").addEventListener("click", () => handle(exportBackup, "Portable pack exported"));
   $("backup-restore-btn").addEventListener("click", () => $("backup-restore-file").click());
+  $("factory-reset-local-btn")?.addEventListener("click", () => handle(factoryResetLocalExtension));
   $("backup-restore-file").addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     handle(() => restoreBackup(file));
@@ -4482,6 +4705,7 @@ async function optionsVerifyOtp() {
   setInlineMessage(messageNode, "Account verified and connected!", "success");
   toast("Account verified and connected!", "success");
   await loadState();
+  await promptAutoSyncAfterLogin("options");
 }
 
 function initCommandPalette() {

@@ -244,3 +244,12 @@ export function resetProtectedStorageMemo() {
   protectedCryptoKeyPromise = null;
   protectedMemoryCache = {};
 }
+
+export async function factoryResetLocalExtensionStorage() {
+  resetProtectedStorageMemo();
+  await Promise.all([
+    chrome.storage.local.clear(),
+    chrome.storage.session?.clear ? chrome.storage.session.clear() : Promise.resolve()
+  ]);
+  resetProtectedStorageMemo();
+}

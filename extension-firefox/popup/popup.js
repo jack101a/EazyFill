@@ -27,7 +27,8 @@ const state = {
   busyButtonId: null,
   authChallengeId: "",
   authEmail: "",
-  authStep: "email"
+  authStep: "email",
+  userscriptStatus: {}
 };
 
 const BUTTON_LABELS = {
@@ -78,6 +79,17 @@ function normalizeDomain(value) {
 
 function activeDomain() {
   return normalizeDomain(state.status?.activeTab?.hostname || state.status?.activeTab?.url || "");
+}
+
+function planAllowsSync(plan) {
+  if (!plan || typeof plan !== "object") return false;
+  if (plan.features && Object.prototype.hasOwnProperty.call(plan.features, "cloud_sync")) {
+    return plan.features.cloud_sync === true;
+  }
+  if (plan.allowed_services && Object.prototype.hasOwnProperty.call(plan.allowed_services, "sync")) {
+    return plan.allowed_services.sync === true;
+  }
+  return false;
 }
 
 function activeProfileId() {
@@ -386,6 +398,102 @@ function renderPopupScripts(status = {}) {
   }
 }
 
+function chromeMajorVersion() {
+  return Number(navigator.userAgent.match(/(?:Chrome|Chromium)\/([0-9]+)/)?.[1] || 0);
+}
+
+function popupUserscriptSetupMode(status = state.userscriptStatus || {}) {
+  const explicit = String(status.setupMode || "");
+  if (explicit) return explicit;
+  const version = Number(status.chromeVersion || chromeMajorVersion() || 0);
+  return version >= 138 ? "allow_user_scripts" : "developer_mode";
+}
+
+function popupUserscriptSetupUrl(status = state.userscriptStatus || {}) {
+  const extensionId = globalThis.chrome?.runtime?.id || "";
+  const defaultUrl = extensionId ? `chrome://extensions/?id=${extensionId}` : "chrome://extensions";
+  return String(status.detailsUrl || status.helpUrl || defaultUrl);
+}
+
+function popupUserscriptRuntimeReady(status = state.userscriptStatus || {}) {
+  return (status.available || status.ok) && !status.setupRequired;
+}
+
+function popupUserscriptRuntimeNeedsSetup(status = state.userscriptStatus || {}) {
+  return !!Object.keys(status || {}).length && !popupUserscriptRuntimeReady(status) && !status.authRequired;
+}
+
+function popupUserscriptSetupCopy(status = state.userscriptStatus || {}) {
+  if (popupUserscriptSetupMode(status) === "allow_user_scripts") {
+    return {
+      title: "Allow User Scripts is off",
+      body: "Enable it in EazyFill extension details, then reload EazyFill.",
+      button: "Open Details"
+    };
+  }
+  return {
+    title: "Developer mode required",
+    body: "Enable Developer mode on chrome://extensions, then reload EazyFill.",
+    button: "Open Extensions"
+  };
+}
+
+async function openUserscriptSetupPage(status = state.userscriptStatus || {}) {
+  const url = popupUserscriptSetupUrl(status);
+  if (!url) return;
+  try {
+    if (!globalThis.chrome?.tabs?.create) throw new Error("Tabs API unavailable");
+    await new Promise((resolve, reject) => {
+      chrome.tabs.create({ url }, () => {
+        const message = chrome.runtime?.lastError?.message;
+        if (message) reject(new Error(message));
+        else resolve();
+      });
+    });
+  } catch (_) {
+    try {
+      await navigator.clipboard?.writeText(url);
+      setAlert("Chrome blocked opening the settings page, so the URL was copied.", "warning");
+    } catch {
+      setAlert(`Open ${url}`, "warning");
+    }
+  }
+}
+
+function renderPopupUserscriptRuntime() {
+  const alert = $("popup-userscript-runtime");
+  const status = state.userscriptStatus || {};
+  const shouldShow = isExtensionEnabled()
+    && state.settings.userscriptsEnabled !== false
+    && state.status?.runtime?.userscriptsAllowed !== false
+    && popupUserscriptRuntimeNeedsSetup(status);
+
+  if ($("scripts-status") && shouldShow) {
+    $("scripts-status").textContent = popupUserscriptSetupCopy(status).title;
+  }
+  if (!alert) return;
+  alert.replaceChildren();
+  alert.hidden = !shouldShow;
+  if (!shouldShow) return;
+
+  const copy = popupUserscriptSetupCopy(status);
+  const text = document.createElement("div");
+  text.className = "popup-runtime-copy";
+  const title = document.createElement("strong");
+  title.textContent = copy.title;
+  const body = document.createElement("span");
+  body.textContent = copy.body;
+  text.append(title, body);
+
+  const button = document.createElement("button");
+  button.className = "button quiet popup-runtime-button";
+  button.type = "button";
+  button.textContent = copy.button;
+  button.addEventListener("click", () => openUserscriptSetupPage(status));
+
+  alert.append(text, button);
+}
+
 function renderStatus(status) {
   state.status = status || {};
   state.settings = { ...DEFAULT_SETTINGS, ...(status?.settings || {}) };
@@ -428,15 +536,18 @@ function renderStatus(status) {
   $("toggle-scripts").checked = state.settings.userscriptsEnabled !== false;
 
   if ($("popup-toggle-sync")) {
+    const syncAvailable = extensionEnabled && status.authenticated && planAllowsSync(status.plan || {});
     $("popup-toggle-sync").checked = !!state.settings.syncEnabled;
-    $("popup-toggle-sync").disabled = !extensionEnabled || !status.authenticated;
+    $("popup-toggle-sync").disabled = !syncAvailable;
     $("popup-sync-status").textContent = !extensionEnabled
-      ? "Cloud Sync: Extension off"
+      ? "Auto Sync: Extension off"
       : !status.authenticated
-      ? "Cloud Sync: Connect account"
-      : state.settings.syncEnabled ? "Cloud Sync: Enabled" : "Cloud Sync: Disabled";
-    $("popup-sync-push").disabled = !extensionEnabled || !status.authenticated || !state.settings.syncEnabled;
-    $("popup-sync-pull").disabled = !extensionEnabled || !status.authenticated || !state.settings.syncEnabled;
+      ? "Auto Sync: Connect account"
+      : !syncAvailable
+      ? "Sync not in plan"
+      : state.settings.syncEnabled ? "Auto Sync: On" : "Manual sync ready";
+    $("popup-sync-push").disabled = !syncAvailable;
+    $("popup-sync-pull").disabled = !syncAvailable;
   }
 
   const counts = status.counts || {};
@@ -479,6 +590,7 @@ function renderStatus(status) {
       ? counts.matchingScripts ? `${counts.matchingScripts} running on this page`
         : counts.activeScripts ? "No active scripts match" : counts.scripts ? "Saved, not active" : "No scripts saved"
       : counts.activeScripts ? `${counts.activeScripts}/${counts.scripts || counts.activeScripts} active` : counts.scripts ? "Saved, not active" : "No scripts saved";
+  renderPopupUserscriptRuntime();
   renderPopupScripts(status);
 
   document.querySelector('[data-module="captcha"]')?.classList.toggle("is-paused", !extensionEnabled || !authenticated || state.settings.captchaEnabled === false || quotaReached);
@@ -496,7 +608,11 @@ function renderStatus(status) {
 }
 
 async function refreshStatus() {
-  const response = await sendMessage({ type: "GET_STATUS" });
+  const [response, userscriptStatus] = await Promise.all([
+    sendMessage({ type: "GET_STATUS" }),
+    sendMessage({ type: "USERSCRIPTS_STATUS" })
+  ]);
+  state.userscriptStatus = userscriptStatus && typeof userscriptStatus === "object" ? userscriptStatus : {};
   if (!response.ok) {
     showServiceUnavailable();
     return;
@@ -592,6 +708,7 @@ async function verifyPopupOtp() {
   setPopupAuthStep("email");
   setAuthMessage("Signed in. Sync and billing are ready.", "success");
   await refreshStatus();
+  await promptAutoSyncAfterLogin();
   setTimeout(() => setPopupAuthVisible(false), 700);
 }
 
@@ -620,6 +737,17 @@ async function saveSettings(patch) {
   }
   renderStatus({ ...state.status, settings: state.settings });
   return true;
+}
+
+async function promptAutoSyncAfterLogin() {
+  if (!state.status?.authenticated || !planAllowsSync(state.status.plan || {}) || state.settings.syncEnabled === true) return;
+  const accepted = window.confirm(
+    "Enable Auto Sync for multi-device synchronization? EazyFill will automatically push local rules, scripts, CAPTCHA routes, and profiles to your encrypted cloud copy."
+  );
+  if (!accepted) return;
+  await saveSettings({ syncEnabled: true });
+  await sendMessage({ type: "SYNC_PUSH" }).catch(() => null);
+  setAlert("Auto Sync enabled for this browser.", "success");
 }
 
 async function toggleExtensionPower() {

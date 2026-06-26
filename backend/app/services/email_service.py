@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import html
 import logging
+import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 import httpx
 
@@ -81,7 +81,13 @@ class EmailService:
         ttl_minutes = max(1, int(ttl_seconds // 60))
         escaped_otp = html.escape(str(otp))
         escaped_reply_to = html.escape(reply_to)
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        logo_url = self._brand_logo_url()
+        logo_html = ""
+        if logo_url:
+            logo_html = f"""
+                    <td width="54" style="width:54px;padding:0 14px 0 0;vertical-align:middle;">
+                      <img src="{html.escape(logo_url, quote=True)}" width="44" height="44" alt="EazyFill" style="display:block;width:44px;height:44px;border:0;outline:none;text-decoration:none;">
+                    </td>"""
         html_content = f"""<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#172033;">
@@ -91,8 +97,14 @@ class EmailService:
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
             <tr>
               <td style="padding:28px 32px 18px;border-bottom:1px solid #edf2f7;">
-                <div style="font-size:20px;font-weight:700;color:#0f172a;">EazyFill</div>
-                <div style="margin-top:6px;font-size:14px;color:#64748b;">Secure account verification</div>
+                <table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                  <tr>{logo_html}
+                    <td style="vertical-align:middle;">
+                      <div style="font-size:20px;font-weight:700;color:#0f172a;">EazyFill</div>
+                      <div style="margin-top:6px;font-size:14px;color:#64748b;">Secure account verification</div>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
             <tr>
@@ -102,11 +114,6 @@ class EmailService:
                 <div style="background:#0f172a;color:#ffffff;font-size:34px;font-weight:700;letter-spacing:8px;text-align:center;border-radius:10px;padding:18px 12px;margin:0 0 22px;">{escaped_otp}</div>
                 <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#64748b;">If you did not request this code, you can safely ignore this email.</p>
                 <p style="margin:0;font-size:14px;line-height:1.6;color:#64748b;">Need help? Contact <a href="mailto:{escaped_reply_to}" style="color:#2563eb;text-decoration:none;">{escaped_reply_to}</a>.</p>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #edf2f7;font-size:12px;line-height:1.5;color:#94a3b8;">
-                Sent by EazyFill at {stamp}.
               </td>
             </tr>
           </table>
@@ -129,3 +136,10 @@ class EmailService:
             "tags": ["otp"],
         }
         return payload
+
+    @staticmethod
+    def _brand_logo_url() -> str:
+        base_url = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+        if not base_url.lower().startswith(("https://", "http://")):
+            return ""
+        return f"{base_url}/static/brand/server-avatar-256.png"

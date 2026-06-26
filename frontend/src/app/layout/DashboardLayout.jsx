@@ -8,10 +8,8 @@ export function DashboardLayout({
   children,
   handleLogout,
   loading, toast,
-  createdKeyModal, setCreatedKeyModal,
-  handleCopyKey,
 }) {
-  const { isDark, t_bg, t_textHeading, t_textMuted, glassPanel, glassButton, solidButton } = useThemeContext();
+  const { isDark, t_bg, t_textHeading, t_textMuted, glassPanel, glassButton } = useThemeContext();
 
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
 
@@ -25,13 +23,10 @@ export function DashboardLayout({
       if (e.key === "Escape" && cheatSheetOpen) {
         setCheatSheetOpen(false);
       }
-      if (e.key === "Escape" && createdKeyModal.open) {
-        setCreatedKeyModal({ open: false, keyId: null, keyValue: "", warnings: [] });
-      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [createdKeyModal.open, setCreatedKeyModal, cheatSheetOpen]);
+  }, [cheatSheetOpen]);
 
   return (
     <div className={`min-h-screen font-sans selection:bg-[#A83AFB]/30 relative overflow-x-hidden transition-colors duration-500 ${t_bg}`}>
@@ -54,32 +49,6 @@ export function DashboardLayout({
               ${isDark ? "" : "bg-white/80"}`}>
               {toast.type === "error" ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
               <span className="text-sm font-medium drop-shadow-sm">{toast.message}</span>
-            </div>
-          </div>
-        )}
-
-        {createdKeyModal.open && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className={`${glassPanel} w-full max-w-xl rounded-2xl p-5`}>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className={`text-lg font-semibold ${t_textHeading}`}>API Key</h3>
-                <button onClick={() => setCreatedKeyModal({ open: false, keyId: null, keyValue: "", warnings: [] })} className={`text-sm ${t_textMuted} hover:text-rose-500`}>Close</button>
-              </div>
-              <p className={`text-xs mb-3 ${t_textMuted}`}>Key ID: {createdKeyModal.keyId ?? "\u2013"} | Save this key securely \u2014 it won't be shown again.</p>
-              <div className={`rounded-xl px-3 py-3 border font-mono text-xs break-all ${isDark ? "bg-black/30 border-white/10 text-emerald-300" : "bg-white/80 border-white text-emerald-700"}`}>
-                {createdKeyModal.keyValue || "(no key value)"}
-              </div>
-              {createdKeyModal.warnings?.length > 0 && (
-                <div className={`mt-3 rounded-xl px-3 py-2 border text-xs ${isDark ? "bg-amber-500/10 border-amber-500/30 text-amber-200" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
-                  {createdKeyModal.warnings.map((warning, index) => (
-                    <div key={`${warning}-${index}`}>{warning}</div>
-                  ))}
-                </div>
-              )}
-              <div className="mt-4 flex justify-end gap-2">
-                <button onClick={() => handleCopyKey(createdKeyModal.keyValue)} className={glassButton}>Copy Key</button>
-                <button onClick={() => setCreatedKeyModal({ open: false, keyId: null, keyValue: "", warnings: [] })} className={solidButton}>Done</button>
-              </div>
             </div>
           </div>
         )}
@@ -123,12 +92,4 @@ DashboardLayout.propTypes = {
     message: PropTypes.string,
     type: PropTypes.string,
   }).isRequired,
-  createdKeyModal: PropTypes.shape({
-    open: PropTypes.bool,
-    keyId: PropTypes.any,
-    keyValue: PropTypes.string,
-    warnings: PropTypes.array,
-  }).isRequired,
-  setCreatedKeyModal: PropTypes.func.isRequired,
-  handleCopyKey: PropTypes.func.isRequired,
 };

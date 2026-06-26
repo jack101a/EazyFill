@@ -733,6 +733,38 @@ html[data-theme="light"] .module-detail {
   padding: 8px 10px 10px;
 }
 
+.popup-runtime-alert {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(255, 149, 0, 0.32);
+  border-radius: 8px;
+  background: rgba(255, 149, 0, 0.08);
+}
+
+.popup-runtime-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.popup-runtime-copy strong {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.popup-runtime-copy span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.popup-runtime-button {
+  width: 100%;
+  min-height: 29px;
+}
+
 .popup-script-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

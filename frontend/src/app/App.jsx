@@ -25,9 +25,6 @@ function AppRoutes() {
       handleLogout={context.handleLogout}
       loading={context.loading}
       toast={context.toast}
-      createdKeyModal={context.createdKeyModal}
-      setCreatedKeyModal={context.setCreatedKeyModal}
-      handleCopyKey={context.keyHandlers.handleCopyKey}
     >
       <Suspense fallback={<div className="flex items-center justify-center py-20"><div className={`h-8 w-8 animate-spin rounded-full border-2 border-t-transparent ${isDark ? "border-[#FF5FB8]" : "border-[#8B5CF6]"}`} /></div>}>
         <Routes>

@@ -6,9 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.v2_routes.deps import V2AuthContext, validate_v2_key
+from app.core.db import get_session
+from app.core.models import AuthChallenge
+from app.services.account_auth_service import AccountAuthService
 from app.services.sync_service import SyncBlobTooLargeError, SyncConflictError, SyncIntegrityError
 
 router = APIRouter(prefix="/sync", tags=["v2-sync"])
+account_auth_service = AccountAuthService()
 
 
 class SyncPushRequest(BaseModel):
@@ -16,6 +20,11 @@ class SyncPushRequest(BaseModel):
     sync_version: int = Field(default=1, ge=1)
     encrypted_blob: str
     blob_hash: str
+
+
+class SyncDeleteConfirmRequest(BaseModel):
+    challenge_id: str = Field(min_length=8)
+    otp: str = Field(min_length=4, max_length=12)
 
 
 def _sync_allowed(ctx: V2AuthContext) -> bool:
@@ -37,6 +46,35 @@ def _max_blob_bytes(ctx: V2AuthContext) -> int:
 def _require_sync(ctx: V2AuthContext) -> None:
     if not _sync_allowed(ctx):
         raise HTTPException(status_code=403, detail={"error": "sync_not_available", "message": "Cloud sync is not enabled for this key"})
+
+
+def _sync_delete_email(ctx: V2AuthContext) -> str:
+    email = str(getattr(ctx.user, "email", "") or "").strip().lower()
+    if not email:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "email_required", "message": "Add a verified email before deleting the cloud copy."},
+        )
+    return email
+
+
+def _sync_delete_challenge_belongs_to_user(challenge_id: str, ctx: V2AuthContext) -> bool:
+    email = _sync_delete_email(ctx)
+    session = get_session()
+    try:
+        challenge = (
+            session.query(AuthChallenge)
+            .filter(AuthChallenge.challenge_id == challenge_id)
+            .first()
+        )
+        return bool(
+            challenge
+            and challenge.identifier_type == "email"
+            and str(challenge.identifier or "").strip().lower() == email
+            and str(challenge.account_mode or "") == "sync_delete"
+        )
+    finally:
+        session.close()
 
 
 @router.post("/push")
@@ -79,4 +117,46 @@ async def sync_status(request: Request, ctx: V2AuthContext = Depends(validate_v2
 @router.delete("/delete")
 async def delete_sync(request: Request, ctx: V2AuthContext = Depends(validate_v2_key)) -> dict:
     _require_sync(ctx)
-    return request.app.state.container.sync_service.delete_blob(int(ctx.user_id))
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "error": "otp_required",
+            "message": "Email OTP is required before deleting your cloud copy.",
+        },
+    )
+
+
+@router.post("/delete/request-otp")
+async def request_delete_sync_otp(request: Request, ctx: V2AuthContext = Depends(validate_v2_key)) -> dict:
+    _require_sync(ctx)
+    email = _sync_delete_email(ctx)
+    return await account_auth_service.send_action_otp(
+        request,
+        email=email,
+        name=str(getattr(ctx.user, "full_name", "") or ""),
+        plan_code=str(getattr(ctx.plan, "code", "") or "free"),
+        account_mode="sync_delete",
+    )
+
+
+@router.post("/delete/confirm")
+async def confirm_delete_sync(
+    request: Request,
+    payload: SyncDeleteConfirmRequest,
+    ctx: V2AuthContext = Depends(validate_v2_key),
+) -> dict:
+    _require_sync(ctx)
+    email = _sync_delete_email(ctx)
+    if not _sync_delete_challenge_belongs_to_user(payload.challenge_id, ctx):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_otp_challenge", "message": "OTP challenge is not valid for this account."},
+        )
+    account_auth_service.verify_action_otp(
+        challenge_id=payload.challenge_id,
+        otp=payload.otp,
+        account_mode="sync_delete",
+        email=email,
+    )
+    deleted = request.app.state.container.sync_service.delete_blob(int(ctx.user_id))
+    return {"ok": True, **deleted}

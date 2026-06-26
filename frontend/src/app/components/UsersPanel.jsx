@@ -8,16 +8,13 @@ import {
   ChevronRight,
   CreditCard,
   Edit3,
-  Key,
   Loader2,
   RefreshCw,
-  RotateCw,
   Search,
   ShieldOff,
   Trash2,
   UserPlus,
   Users,
-  XCircle,
 } from "lucide-react";
 import { useThemeContext } from "../context/ThemeContext";
 import { createRazorpayOrder, listAdminPlans } from "../../api/billing";
@@ -29,7 +26,6 @@ import {
   getUser,
   listUsers,
   renewUserSubscription,
-  runUserKeyAction,
   setUserStatus,
   updateUser,
 } from "../../api/users";
@@ -53,7 +49,6 @@ const EMPTY_FORM = {
   notes: "",
   plan_id: "",
   duration_days: "",
-  issue_api_key: true,
 };
 
 function errMessage(error, fallback) {
@@ -107,7 +102,6 @@ export function UsersPanel({ showToast }) {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [keyResult, setKeyResult] = useState(null);
   const [razorpayOrder, setRazorpayOrder] = useState(null);
   const limit = 20;
 
@@ -149,7 +143,7 @@ export function UsersPanel({ showToast }) {
   };
 
   const openCreate = () => {
-    setForm({ ...EMPTY_FORM, issue_api_key: false, duration_days: plans[0]?.duration_days || "" });
+    setForm({ ...EMPTY_FORM, duration_days: plans[0]?.duration_days || "" });
     setShowCreate(true);
   };
 
@@ -164,7 +158,6 @@ export function UsersPanel({ showToast }) {
       mobile_number: user.mobile_number || "",
       status: user.status || "inactive",
       notes: user.notes || "",
-      issue_api_key: false,
     });
     try {
       const details = await getUser(user.id);
@@ -190,16 +183,15 @@ export function UsersPanel({ showToast }) {
     notes: form.notes,
     plan_id: form.plan_id ? Number(form.plan_id) : null,
     duration_days: form.duration_days ? Number(form.duration_days) : null,
-    issue_api_key: Boolean(form.issue_api_key && form.plan_id),
+    issue_api_key: false,
   });
 
   const handleCreate = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const created = await createUser(createPayload());
+      await createUser(createPayload());
       showToast("User created");
-      if (created.created_key?.api_key) setKeyResult(created.created_key);
       resetModal();
       fetchUsers();
     } catch (e) {
@@ -282,12 +274,11 @@ export function UsersPanel({ showToast }) {
         });
         showToast("Plan changed");
       } else if (action === "renew") {
-        const renewed = await renewUserSubscription(editingUser.id, {
+        await renewUserSubscription(editingUser.id, {
           plan_id: Number(form.plan_id),
           duration_days: form.duration_days ? Number(form.duration_days) : planDuration(plans, form.plan_id),
-          issue_api_key: true,
+          issue_api_key: false,
         });
-        if (renewed.created_key?.api_key) setKeyResult(renewed.created_key);
         showToast("Subscription renewed");
       } else {
         await expireUserSubscription(editingUser.id);
@@ -357,37 +348,6 @@ export function UsersPanel({ showToast }) {
     }
   };
 
-  const handleKeyAction = async (action) => {
-    if (!editingUser) return;
-    const confirmations = {
-      rotate: "Rotate this user's API key? The old key will stop working.",
-      revoke: "Revoke this user's active API key?",
-      "reset-device": "Reset device binding for this user's active key?",
-    };
-    if (confirmations[action]) {
-      const ok = await confirm({
-        title: "Confirm key action",
-        message: confirmations[action],
-        details: [`User: ${editingUser.full_name || editingUser.id}`],
-        confirmLabel: action === "rotate" ? "Rotate Key" : action === "revoke" ? "Revoke Key" : "Reset Device",
-        tone: "warning",
-      });
-      if (!ok) return;
-    }
-    setSaving(true);
-    try {
-      const data = await runUserKeyAction(editingUser.id, action);
-      if (data.api_key) setKeyResult(data);
-      showToast(action === "reset-device" ? "Device binding reset" : `Key ${action} complete`);
-      await openEdit(editingUser);
-      fetchUsers();
-    } catch (e) {
-      showToast(errMessage(e, "Key action failed"), "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const totalPages = Math.ceil(total / limit);
 
   return (
@@ -438,7 +398,7 @@ export function UsersPanel({ showToast }) {
                   <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Email</th>
                   <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Mobile</th>
                   <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Plan</th>
-                  <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Key Usage</th>
+                  <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Activity</th>
                   <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Rate</th>
                   <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Expiry</th>
                   <th className={`text-left p-3 text-xs font-semibold uppercase tracking-wider ${t_textMuted}`}>Status</th>
@@ -458,9 +418,9 @@ export function UsersPanel({ showToast }) {
                       ) : <span className={t_textMuted}>--</span>}
                     </td>
                     <td className={`p-3 ${t_textHeading}`}>
-                      {u.active_key_id ? (
-                        <span>{formatCount(u.key_usage_count)} requests<br/><span className={`text-xs ${t_textMuted}`}>{u.active_key_prefix || "--"} · last {formatDate(u.key_last_used_at)}</span></span>
-                      ) : <span className={t_textMuted}>No key</span>}
+                      {(u.key_usage_count || u.key_last_used_at) ? (
+                        <span>{formatCount(u.key_usage_count)} requests<br/><span className={`text-xs ${t_textMuted}`}>Last {formatDate(u.key_last_used_at)}</span></span>
+                      ) : <span className={t_textMuted}>No activity</span>}
                     </td>
                     <td className={`p-3 ${t_textMuted}`}>
                       {u.plan_rate_limit_rpm ? `${u.plan_rate_limit_rpm} RPM / +${u.plan_rate_limit_burst || 0}` : "--"}
@@ -510,7 +470,7 @@ export function UsersPanel({ showToast }) {
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h3 className={`text-lg font-semibold ${t_textHeading}`}>{editingUser ? "Manage User" : "Create User"}</h3>
-                {editingUser && <p className={`text-xs ${t_textMuted}`}>Profile, plan, subscription and user API key controls.</p>}
+                {editingUser && <p className={`text-xs ${t_textMuted}`}>Profile, plan, billing, and subscription controls.</p>}
               </div>
               {detailsLoading && <Loader2 size={18} className="animate-spin text-indigo-500" />}
             </div>
@@ -539,7 +499,6 @@ export function UsersPanel({ showToast }) {
                       ...form,
                       plan_id: e.target.value,
                       duration_days: planDuration(plans, e.target.value),
-                      issue_api_key: e.target.value ? form.issue_api_key : false,
                     })}
                   >
                     <option value="">No plan</option>
@@ -552,17 +511,6 @@ export function UsersPanel({ showToast }) {
                   <input type="number" min="1" className={glassInput} value={form.duration_days}
                     onChange={(e) => setForm({ ...form, duration_days: e.target.value })} />
                 </Field>
-                {!editingUser && (
-                  <Field label="API Key" muted={t_textMuted}>
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, issue_api_key: !form.issue_api_key })}
-                      className={`w-full px-3 py-2 rounded-xl border text-sm text-left ${t_borderLight} ${form.issue_api_key ? "bg-emerald-500/15 text-emerald-400" : t_textMuted}`}
-                    >
-                      {form.issue_api_key ? "Issue key on create" : "Do not issue key"}
-                    </button>
-                  </Field>
-                )}
                 <div className="sm:col-span-2">
                   <Field label="Notes" muted={t_textMuted}>
                     <textarea className={glassInput} rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
@@ -579,7 +527,7 @@ export function UsersPanel({ showToast }) {
             </form>
 
             {editingUser && (
-              <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="mt-6 grid grid-cols-1 gap-4">
                 <section className={`rounded-xl border p-4 ${t_borderLight}`}>
                   <h4 className={`text-sm font-semibold mb-3 ${t_textHeading}`}>Subscription</h4>
                   <div className={`text-xs mb-3 ${t_textMuted}`}>
@@ -587,7 +535,7 @@ export function UsersPanel({ showToast }) {
                   </div>
                   <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-3 ${t_textMuted}`}>
                     <div>
-                      <span className={t_textHeading}>Plan usage:</span> {formatCount(userDetails?.usage?.plan_usage_used ?? userDetails?.key_usage?.total_usage_count ?? userDetails?.usage?.quota_used)}/{formatCount(userDetails?.usage?.quota_limit)}
+                      <span className={t_textHeading}>Plan usage:</span> {formatCount(userDetails?.usage?.plan_usage_used ?? userDetails?.usage?.quota_used)}/{formatCount(userDetails?.usage?.quota_limit)}
                     </div>
                     <div>
                       <span className={t_textHeading}>Rate limit:</span> {userDetails?.rate_limit?.requests_per_minute || "--"} RPM / +{userDetails?.rate_limit?.burst || 0}
@@ -609,50 +557,8 @@ export function UsersPanel({ showToast }) {
                   </div>
                 </section>
 
-                <section className={`rounded-xl border p-4 ${t_borderLight}`}>
-                  <h4 className={`text-sm font-semibold mb-3 ${t_textHeading}`}>User API Key</h4>
-                  <div className={`text-xs mb-3 ${t_textMuted}`}>
-                    {userDetails?.active_key ? (
-                      <>Active: <span className="font-mono">{userDetails.active_key.key_prefix_display}</span> · v{userDetails.active_key.key_version} · {formatCount(userDetails?.key_usage?.total_usage_count ?? userDetails.active_key.usage_count)} requests · last {formatDate(userDetails?.key_usage?.last_used_at || userDetails.active_key.last_used_at)} · Devices {userDetails.devices?.filter((d) => d.status === "active").length || 0}</>
-                    ) : "No active user-linked key"}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {!userDetails?.active_key && (
-                      <button type="button" className={glassButton} disabled={saving} onClick={() => handleKeyAction("create")}>
-                        <Key size={14} /> Create Key
-                      </button>
-                    )}
-                    {userDetails?.active_key && (
-                      <>
-                        <button type="button" className={glassButton} disabled={saving} onClick={() => handleKeyAction("rotate")}>
-                          <RotateCw size={14} /> Rotate
-                        </button>
-                        <button type="button" className={glassButton} disabled={saving} onClick={() => handleKeyAction("reset-device")}>
-                          <RefreshCw size={14} /> Reset Device
-                        </button>
-                        <button type="button" className={dangerButton} disabled={saving} onClick={() => handleKeyAction("revoke")}>
-                          <XCircle size={14} /> Revoke
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </section>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {keyResult?.api_key && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setKeyResult(null)}>
-          <div className={`${glassPanel} rounded-2xl p-6 w-full max-w-lg border ${t_borderLight}`} onClick={(e) => e.stopPropagation()}>
-            <h3 className={`text-lg font-semibold mb-2 ${t_textHeading}`}>API Key Created</h3>
-            <p className={`text-xs mb-3 ${t_textMuted}`}>This plain key is shown once from the key operation response.</p>
-            <textarea readOnly className={`${glassInput} font-mono text-xs w-full`} rows={4} value={keyResult.api_key} />
-            <div className="flex gap-2 mt-4">
-              <button className={solidButton} onClick={() => navigator.clipboard.writeText(keyResult.api_key).catch(() => {})}>Copy</button>
-              <button className={`px-4 py-2 rounded-xl text-sm ${t_textMuted} border ${t_borderLight}`} onClick={() => setKeyResult(null)}>Close</button>
-            </div>
           </div>
         </div>
       )}

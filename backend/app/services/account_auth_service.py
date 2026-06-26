@@ -532,6 +532,26 @@ class AccountAuthService:
             account_mode="login" if existing else "signup",
         )
 
+    async def send_action_otp(
+        self,
+        request: Request,
+        *,
+        email: str,
+        account_mode: str,
+        name: str = "",
+        plan_code: str = "free",
+    ) -> dict[str, Any]:
+        clean = _clean_email(email)
+        settings = getattr(request.app.state.container, "settings", None)
+        _validate_supported_email(settings, clean)
+        return await self._send_challenge(
+            request,
+            email=clean,
+            name=name,
+            plan_code=plan_code,
+            account_mode=account_mode,
+        )
+
     async def _send_challenge(
         self,
         request: Request,
@@ -595,6 +615,56 @@ class AccountAuthService:
                 .update({"status": status, "updated_at": now}, synchronize_session=False)
             )
             session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def verify_action_otp(
+        self,
+        *,
+        challenge_id: str,
+        otp: str,
+        account_mode: str,
+        email: str,
+    ) -> dict[str, Any]:
+        clean_email = _clean_email(email)
+        session = get_session()
+        try:
+            _purge_expired_challenges(session)
+            challenge = _load_pending_challenge(session, challenge_id)
+            now = _utcnow()
+            if not challenge:
+                raise HTTPException(status_code=400, detail={"error": "otp_expired", "message": "OTP challenge expired"})
+            if challenge.expires_at <= now:
+                challenge.status = "expired"
+                challenge.updated_at = now
+                session.commit()
+                raise HTTPException(status_code=400, detail={"error": "otp_expired", "message": "OTP challenge expired"})
+            if (
+                str(challenge.account_mode or "") != str(account_mode or "")
+                or str(challenge.identifier_type or "") != "email"
+                or str(challenge.identifier or "").strip().lower() != clean_email
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": "invalid_otp_challenge", "message": "OTP challenge is not valid for this action."},
+                )
+            challenge.attempts = int(challenge.attempts or 0) + 1
+            challenge.updated_at = now
+            if challenge.attempts > 5:
+                challenge.status = "failed"
+                session.commit()
+                raise HTTPException(status_code=429, detail={"error": "otp_attempts_exceeded", "message": "Too many OTP attempts"})
+            if not secrets.compare_digest(str(challenge.otp_hash), _otp_hash(otp)):
+                session.commit()
+                raise HTTPException(status_code=400, detail={"error": "invalid_otp", "message": "OTP is invalid"})
+            challenge.status = "consumed"
+            challenge.consumed_at = now
+            challenge.updated_at = now
+            session.commit()
+            return {"ok": True, "challenge_id": str(challenge.challenge_id), "email": clean_email}
         except Exception:
             session.rollback()
             raise

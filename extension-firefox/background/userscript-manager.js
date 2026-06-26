@@ -256,32 +256,53 @@ async function getRegisteredBootstrapCapability(scriptId) {
 }
 
 function userscriptSetupInfo() {
+  const version = Number(navigator.userAgent.match(/(?:Chrome|Chromium)\/([0-9]+)/)?.[1] || 0);
+  const usesPerExtensionToggle = version >= 138;
+  const detailsUrl = `chrome://extensions/?id=${chrome.runtime.id}`;
   return {
     available: !!chrome.userScripts?.register,
     registerAvailable: !!chrome.userScripts?.register,
     unregisterAvailable: !!chrome.userScripts?.unregister,
     getScriptsAvailable: !!chrome.userScripts?.getScripts,
     setupRequired: !chrome.userScripts?.register,
-    instructions: [
-      "Open chrome://extensions.",
-      "Enable Developer mode.",
-      "Open EazyFill details.",
-      "Enable Allow User Scripts, then reload EazyFill."
-    ],
-    helpUrl: "chrome://extensions"
+    chromeVersion: version || null,
+    setupMode: usesPerExtensionToggle ? "allow_user_scripts" : "developer_mode",
+    detailsUrl,
+    instructions: usesPerExtensionToggle
+      ? [
+          "Open EazyFill extension details.",
+          "Enable Allow User Scripts.",
+          "Reload EazyFill."
+        ]
+      : [
+          "Open chrome://extensions.",
+          "Enable Developer mode.",
+          "Reload EazyFill."
+        ],
+    helpUrl: usesPerExtensionToggle ? detailsUrl : "chrome://extensions"
   };
 }
 
 export async function getUserscriptRuntimeStatus() {
   const status = userscriptSetupInfo();
   let registeredCount = 0;
+  let available = false;
+  let runtimeError = "";
   if (status.getScriptsAvailable) {
-    const scripts = await chrome.userScripts.getScripts().catch(() => []);
-    registeredCount = (scripts || []).filter((script) => String(script.id || "").startsWith(REGISTERED_PREFIX)).length;
+    try {
+      const scripts = await chrome.userScripts.getScripts();
+      available = true;
+      registeredCount = (scripts || []).filter((script) => String(script.id || "").startsWith(REGISTERED_PREFIX)).length;
+    } catch (error) {
+      runtimeError = error?.message || "chrome.userScripts API unavailable";
+    }
   }
   return {
-    ok: status.available,
+    ok: available,
     ...status,
+    available,
+    setupRequired: !available,
+    error: available ? "" : runtimeError || "chrome.userScripts API unavailable",
     registeredCount
   };
 }

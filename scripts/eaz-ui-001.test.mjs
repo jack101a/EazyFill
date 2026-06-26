@@ -195,6 +195,27 @@ async function installChromeMock(page, mode) {
       fp_captcha_selectors: {}
     };
     let isAuthenticated = mockMode !== "unauthenticated";
+    const userscriptRuntimeStatus = mockMode === "userscripts-off"
+      ? {
+          ok: false,
+          available: false,
+          setupRequired: true,
+          setupMode: "allow_user_scripts",
+          detailsUrl: "chrome://extensions/?id=eazyfill-test-extension",
+          instructions: [
+            "Open EazyFill extension details.",
+            "Enable Allow User Scripts.",
+            "Reload EazyFill."
+          ],
+          error: "chrome.userScripts API unavailable"
+        }
+      : {
+          ok: true,
+          available: true,
+          setupRequired: false,
+          setupMode: "allow_user_scripts",
+          registeredCount: 2
+        };
     const availableStatus = {
       authenticated: isAuthenticated,
       activeTab: { url: "https://example.com/form", hostname: "example.com" },
@@ -296,7 +317,7 @@ async function installChromeMock(page, mode) {
         const responses = {
           GET_STATUS: { ok: true, status: currentStatus() },
           GET_EXTENSION_STORAGE: { ok: true, data: extensionStorage },
-          USERSCRIPTS_STATUS: { ok: true, available: false, error: "Allow User Scripts" },
+          USERSCRIPTS_STATUS: userscriptRuntimeStatus,
           BILLING_PLANS: {
             ok: true,
             plans: [{
@@ -329,8 +350,9 @@ async function installChromeMock(page, mode) {
     globalThis.chrome = {
       runtime,
       tabs: {
-        create({ url }) {
+        create({ url }, callback) {
           globalThis.__openedExtensionTabs.push(url);
+          if (typeof callback === "function") callback({ id: 1001, url });
         }
       }
     };
@@ -362,6 +384,7 @@ try {
     });
   assert.equal(await optionsPage.locator("#panel-title").innerText(), "Overview");
   await captureSnapshot(optionsPage, "options-overview");
+  assert.equal(await optionsPage.locator("#overview-userscript-alert").isHidden(), true);
   assert.equal(await optionsPage.locator('.nav-item[data-panel="billing-panel"]').count(), 0);
   await optionsPage.locator('.nav-item[data-panel="account-panel"]').click();
   await optionsPage.waitForSelector("#account-panel.active");
@@ -374,6 +397,10 @@ try {
   await optionsPage.getByRole("button", { name: "Sign In First" }).nth(1).click();
   await optionsPage.waitForFunction(() => document.activeElement?.id === "options-signup-identifier");
   assert.equal(await optionsPage.evaluate(() => globalThis.__runtimeMessages.some((message) => message.type === "BILLING_CREATE_ORDER")), false);
+  await optionsPage.locator('.nav-item[data-panel="sync-panel"]').click();
+  await optionsPage.waitForSelector("#sync-panel.active");
+  assert.equal(await optionsPage.locator("#factory-reset-local-btn").innerText(), "Factory Reset");
+  assert.match(await optionsPage.locator("#sync-panel").innerText(), /Cloud sync data is not deleted/);
   await optionsPage.locator('.nav-item[data-panel="profiles-panel"]').click();
   await optionsPage.waitForSelector("#profiles-panel.active");
   assert.equal(await optionsPage.locator("#active-profile-id").inputValue(), "work");
@@ -459,6 +486,7 @@ try {
   await optionsPage.locator('.nav-item[data-panel="scripts-panel"]').click();
   await optionsPage.waitForSelector("#scripts-panel.active");
   await captureSnapshot(optionsPage, "options-userscripts");
+  assert.match(await optionsPage.locator("#script-runtime-status").innerText(), /Userscript runtime ready/);
   assert.equal(await optionsPage.locator("#script-editor-card").isHidden(), true);
   assert.equal(await optionsPage.locator("#script-register-btn").count(), 0);
   const localScriptRow = optionsPage.locator('#scripts-table tr[data-id="local-script"]');
@@ -474,6 +502,22 @@ try {
   assert.equal(await optionsPage.locator("#scripts-table").getByText("Migrated").count(), 0);
   assert.equal(await optionsPage.locator("#script-import-url-input").count(), 1);
   assert.equal(await optionsPage.locator("#script-import-direct-btn").count(), 1);
+
+  const blockedOptionsPage = await browser.newPage();
+  await installChromeMock(blockedOptionsPage, "userscripts-off");
+  await blockedOptionsPage.goto(`${baseUrl}/options/options.html`);
+  await blockedOptionsPage.waitForSelector("#overview-panel.active");
+  await blockedOptionsPage.waitForFunction(() => document.querySelector("#connection-label")?.textContent !== "Checking status");
+  assert.equal(await blockedOptionsPage.locator("#overview-userscript-alert").isVisible(), true);
+  assert.match(await blockedOptionsPage.locator("#overview-userscript-alert").innerText(), /Allow User Scripts is off/);
+  await blockedOptionsPage.locator("#overview-userscript-alert").getByRole("button", { name: "Open Extension Details" }).click();
+  assert.deepEqual(await blockedOptionsPage.evaluate(() => globalThis.__openedExtensionTabs), [
+    "chrome://extensions/?id=eazyfill-test-extension"
+  ]);
+  await blockedOptionsPage.locator('.nav-item[data-panel="scripts-panel"]').click();
+  await blockedOptionsPage.waitForSelector("#scripts-panel.active");
+  assert.match(await blockedOptionsPage.locator("#script-runtime-status").innerText(), /Enable Allow User Scripts/);
+
   await optionsPage.route("https://greasyfork.org/scripts/12345/code/youtube-downloader.user.js", (route) => route.fulfill({
     status: 200,
     contentType: "text/javascript",
@@ -629,6 +673,7 @@ window.__greasyForkImport = true;
   assert.equal(await popupPage.locator("#new-script").count(), 0);
   assert.equal(await popupPage.locator("#popup-scripts-list").getByText("Local Helper").count(), 1);
   assert.equal(await popupPage.locator("#popup-scripts-list").getByText("Remote Helper").count(), 1);
+  assert.equal(await popupPage.locator("#popup-userscript-runtime").isHidden(), true);
   const localPopupScript = popupPage.locator(".popup-script-item").filter({ hasText: "Local Helper" });
   await localPopupScript.locator("label.switch").click();
   await popupPage.waitForFunction(() => (
@@ -643,6 +688,20 @@ window.__greasyForkImport = true;
   assert.deepEqual(await popupPage.evaluate(() => globalThis.__openedExtensionTabs), [
     "options/options.html?tab=account-panel"
   ]);
+
+  const blockedPopupPage = await browser.newPage();
+  await installChromeMock(blockedPopupPage, "userscripts-off");
+  await blockedPopupPage.goto(`${baseUrl}/popup/popup.html`);
+  await blockedPopupPage.waitForSelector("#app-view.active");
+  assert.equal(await blockedPopupPage.locator("#scripts-status").innerText(), "Allow User Scripts is off");
+  await blockedPopupPage.locator('[data-module-toggle="scripts"]').click();
+  assert.equal(await blockedPopupPage.locator("#popup-userscript-runtime").isVisible(), true);
+  assert.match(await blockedPopupPage.locator("#popup-userscript-runtime").innerText(), /Enable it in EazyFill extension details/);
+  await blockedPopupPage.locator("#popup-userscript-runtime").getByRole("button", { name: "Open Details" }).click();
+  assert.deepEqual(await blockedPopupPage.evaluate(() => globalThis.__openedExtensionTabs), [
+    "chrome://extensions/?id=eazyfill-test-extension"
+  ]);
+
   await popupPage.locator('[data-module-toggle="captcha"]').click();
   await popupPage.evaluate(() => {
     document.querySelector("#popup-captcha-source").value = "#captchaText";

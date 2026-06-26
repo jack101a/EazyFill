@@ -39,7 +39,3 @@ export function renewUserSubscription(userId, payload) {
 export function expireUserSubscription(userId) {
   return apiPostJson(adminApi(`/users/${Number(userId)}/subscription/expire`), {});
 }
-
-export function runUserKeyAction(userId, action) {
-  return apiPostJson(adminApi(`/users/${Number(userId)}/key/${action}`), {});
-}
