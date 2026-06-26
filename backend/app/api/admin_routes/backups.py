@@ -19,6 +19,8 @@ router = APIRouter(tags=["admin-backups"])
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _BACKUPS_DIR = (_PROJECT_ROOT / "backend" / "backups").resolve()
+ADMIN_BACKUP_TYPES = {"full", "system", "users"}
+REMOTE_TARGETS = {"rclone", "r2"}
 
 @router.get("/export/field-mappings.json")
 async def export_field_mappings(request: Request):
@@ -258,6 +260,19 @@ async def create_system_backup(request: Request) -> Any:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.post("/api/backups/full")
+async def create_full_backup(request: Request) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    container = request.app.state.container
+    try:
+        result = container.backup_service.full_backup()
+        return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 502)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.post("/api/backups/users")
 async def create_user_backup(request: Request) -> Any:
     denied = _admin_guard(request)
@@ -305,13 +320,13 @@ async def inspect_backup(request: Request) -> Any:
     container = request.app.state.container
     backup_type = str(request.query_params.get("type", "")).strip().lower()
     filename = str(request.query_params.get("filename", "")).strip()
-    if backup_type not in {"postgres", "system", "users"}:
-        return JSONResponse({"error": "type must be 'postgres', 'system', or 'users'"}, status_code=400)
+    if backup_type not in ADMIN_BACKUP_TYPES:
+        return JSONResponse({"error": "type must be 'full', 'system', or 'users'"}, status_code=400)
     if not filename:
         return JSONResponse({"error": "filename is required"}, status_code=400)
     try:
-        if backup_type == "postgres":
-            result = container.backup_service.inspect_postgres_backup(filename)
+        if backup_type == "full":
+            result = container.backup_service.inspect_full_backup(filename)
         elif backup_type == "system":
             result = container.backup_service.inspect_system_backup(filename)
         else:
@@ -330,13 +345,13 @@ async def restore_split_backup(request: Request) -> Any:
     body = await request.json()
     backup_type = str(body.get("type", "")).strip().lower()
     filename = str(body.get("filename", "")).strip()
-    if backup_type not in {"postgres", "system", "users"}:
-        return JSONResponse({"error": "type must be 'postgres', 'system', or 'users'"}, status_code=400)
+    if backup_type not in ADMIN_BACKUP_TYPES:
+        return JSONResponse({"error": "type must be 'full', 'system', or 'users'"}, status_code=400)
     if not filename:
         return JSONResponse({"error": "filename is required"}, status_code=400)
     try:
-        if backup_type == "postgres":
-            result = container.backup_service.restore_postgres_backup(
+        if backup_type == "full":
+            result = container.backup_service.restore_full_backup(
                 filename,
                 confirm=str(body.get("confirm", "")),
             )
@@ -355,9 +370,17 @@ async def rclone_sync_latest(request: Request) -> Any:
     if denied:
         return denied
     container = request.app.state.container
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    target = str(body.get("target") or "rclone").strip().lower()
+    if target not in REMOTE_TARGETS:
+        return JSONResponse({"success": False, "error": "target must be 'rclone' or 'r2'"}, status_code=400)
     results = []
-    for category in ["postgres", "system", "users"]:
-        r = container.backup_service.rclone_sync_latest_category(category)
+    for category in ["full", "system", "users"]:
+        r = container.backup_service.rclone_sync_latest_category(category, target=target)
         results.append({**r, "category": category})
     return JSONResponse({"results": results})
 
@@ -370,9 +393,12 @@ async def rclone_pull_latest(request: Request) -> Any:
     container = request.app.state.container
     body = await request.json()
     category = str(body.get("type", "")).strip().lower()
-    if category not in {"postgres", "system", "users"}:
-        return JSONResponse({"success": False, "error": "type must be 'postgres', 'system', or 'users'"}, status_code=400)
-    result = container.backup_service.rclone_pull_latest(category)
+    target = str(body.get("target") or "rclone").strip().lower()
+    if category not in ADMIN_BACKUP_TYPES:
+        return JSONResponse({"success": False, "error": "type must be 'full', 'system', or 'users'"}, status_code=400)
+    if target not in REMOTE_TARGETS:
+        return JSONResponse({"success": False, "error": "target must be 'rclone' or 'r2'"}, status_code=400)
+    result = container.backup_service.rclone_pull_latest(category, target=target)
     return JSONResponse(result, status_code=200 if result.get("success") else 502)
 
 
@@ -384,11 +410,57 @@ async def rclone_restore_latest(request: Request) -> Any:
     container = request.app.state.container
     body = await request.json()
     category = str(body.get("type", "")).strip().lower()
-    if category not in {"postgres", "system", "users"}:
-        return JSONResponse({"success": False, "error": "type must be 'postgres', 'system', or 'users'"}, status_code=400)
-    if category == "postgres" and str(body.get("confirm", "")) != "RESTORE POSTGRES":
+    target = str(body.get("target") or "rclone").strip().lower()
+    if category not in ADMIN_BACKUP_TYPES:
+        return JSONResponse({"success": False, "error": "type must be 'full', 'system', or 'users'"}, status_code=400)
+    if target not in REMOTE_TARGETS:
+        return JSONResponse({"success": False, "error": "target must be 'rclone' or 'r2'"}, status_code=400)
+    if category == "full" and str(body.get("confirm", "")) != "RESTORE FULL SNAPSHOT":
         return JSONResponse({"success": False, "error": "confirmation phrase required"}, status_code=400)
-    result = container.backup_service.rclone_restore_latest(category)
+    result = container.backup_service.rclone_restore_latest(category, target=target, confirm=str(body.get("confirm", "")))
+    return JSONResponse(result, status_code=200 if result.get("success") else 502)
+
+
+@router.post("/api/backups/telegram-sync")
+async def telegram_sync_latest(request: Request) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    container = request.app.state.container
+    results = []
+    for category in ["full", "system", "users"]:
+        r = container.backup_service.telegram_sync_latest_category(category)
+        results.append({**r, "category": category})
+    return JSONResponse({"results": results})
+
+
+@router.post("/api/backups/telegram-pull-latest")
+async def telegram_pull_latest(request: Request) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    container = request.app.state.container
+    body = await request.json()
+    category = str(body.get("type", "")).strip().lower()
+    if category not in ADMIN_BACKUP_TYPES:
+        return JSONResponse({"success": False, "error": "type must be 'full', 'system', or 'users'"}, status_code=400)
+    result = container.backup_service.telegram_pull_latest(category)
+    return JSONResponse(result, status_code=200 if result.get("success") else 502)
+
+
+@router.post("/api/backups/telegram-restore-latest")
+async def telegram_restore_latest(request: Request) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    container = request.app.state.container
+    body = await request.json()
+    category = str(body.get("type", "")).strip().lower()
+    if category not in ADMIN_BACKUP_TYPES:
+        return JSONResponse({"success": False, "error": "type must be 'full', 'system', or 'users'"}, status_code=400)
+    if category == "full" and str(body.get("confirm", "")) != "RESTORE FULL SNAPSHOT":
+        return JSONResponse({"success": False, "error": "confirmation phrase required"}, status_code=400)
+    result = container.backup_service.telegram_restore_latest(category, confirm=str(body.get("confirm", "")))
     return JSONResponse(result, status_code=200 if result.get("success") else 502)
 
 
@@ -431,6 +503,18 @@ async def test_rclone_backup_target(request: Request) -> Any:
         except Exception:
             body = {}
         body = body if isinstance(body, dict) else {}
+        target = str(body.get("target") or "rclone").strip().lower()
+        if target == "r2" and not (body.get("rclone_remote") or body.get("rclone_path")):
+            config = container.backup_service.get_remote_backup_config()
+            bucket_path = "/".join(
+                part for part in [
+                    str(config.get("cloudflare_r2_bucket") or "").strip().strip("/"),
+                    str(config.get("cloudflare_r2_prefix") or "").strip().strip("/"),
+                ]
+                if part
+            )
+            body["rclone_remote"] = config.get("cloudflare_r2_remote")
+            body["rclone_path"] = bucket_path
         result = container.backup_service.test_rclone_remote(
             remote=body.get("rclone_remote"),
             remote_path=body.get("rclone_path"),

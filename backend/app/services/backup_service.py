@@ -34,8 +34,10 @@ from app.core.sqlite import sqlite_connect
 logger = logging.getLogger(__name__)
 
 BACKUP_VERSION = 1
-DEFAULT_BACKUP_SIZE_CAP_BYTES = 1024 * 1024 * 1024
+DEFAULT_BACKUP_SIZE_CAP_BYTES = 2 * 1024 * 1024 * 1024
 REMOTE_BACKUP_SIZE_PRUNE_RATIO = 0.9
+TELEGRAM_PUBLIC_SEND_LIMIT_BYTES = 50 * 1024 * 1024
+TELEGRAM_PUBLIC_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 AEAD_BACKUP_MAGIC = b"EAZYFILL-UPBAK-AESGCM-V1\n"
 SYSTEM_FILE_ROOTS = [
     "data/models",
@@ -59,7 +61,8 @@ USER_TABLES = [
     "usage_events",
 ]
 
-SPLIT_BACKUP_CATEGORIES = {"system", "users", "postgres"}
+ADMIN_BACKUP_CATEGORIES = ("full", "system", "users")
+SPLIT_BACKUP_CATEGORIES = {"full", "system", "users", "postgres"}
 
 
 def _sha256(data: bytes) -> str:
@@ -153,6 +156,10 @@ class BackupService:
         }
         try:
             package = self.create_package(backup_id=backup_id)
+            latest_name = self._latest_backup_filename("full", Path(package["path"]))
+            latest_path = self._backup_dir / latest_name
+            latest_path.unlink(missing_ok=True)
+            shutil.copy2(str(package["path"]), str(latest_path))
             result.update({
                 "status": "completed",
                 "finished_at": datetime.now(UTC).isoformat(),
@@ -160,6 +167,7 @@ class BackupService:
                 "checksum": package["checksum"],
                 "size_bytes": package["size_bytes"],
                 "encrypted": package["encrypted"],
+                "latest_file": latest_name,
             })
             self._prune_local_backups_by_size()
             self._log_backup_run(result)
@@ -513,6 +521,8 @@ class BackupService:
             timestamped.extend(("users", path) for path in (self._backup_dir / "users").glob("users_*") if path.is_file())
             latest = [
                 path for path in [
+                    self._backup_dir / "latest_full.upbak",
+                    self._backup_dir / "latest_full.zip",
                     self._backup_dir / "postgres" / "latest_postgres.dump",
                     self._backup_dir / "system" / "latest_system.tar.gz",
                     self._backup_dir / "users" / "latest_users.json.gz",
@@ -625,6 +635,32 @@ class BackupService:
         cmd.extend(args)
         return cmd
 
+    def _write_rclone_remote_section(self, config_path: Path, remote: str, body: str) -> None:
+        header = f"[{remote}]"
+        existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+        lines = existing.splitlines()
+        next_lines: list[str] = []
+        index = 0
+        replaced = False
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() == header:
+                replaced = True
+                next_lines.append(header)
+                next_lines.extend(body.rstrip("\n").splitlines())
+                index += 1
+                while index < len(lines) and not lines[index].lstrip().startswith("["):
+                    index += 1
+                continue
+            next_lines.append(line)
+            index += 1
+        if not replaced:
+            if next_lines and next_lines[-1].strip():
+                next_lines.append("")
+            next_lines.append(header)
+            next_lines.extend(body.rstrip("\n").splitlines())
+        config_path.write_text("\n".join(next_lines).rstrip() + "\n", encoding="utf-8")
+
     def _postgres_env(self) -> tuple[dict[str, str], str]:
         if self._settings.storage.db_type != "postgresql":
             raise RuntimeError("PostgreSQL backup requires DB_TYPE=postgresql")
@@ -708,6 +744,17 @@ class BackupService:
             "cloudflare_r2_prefix": self._setting("backup.cloudflare_r2.prefix", "eazyfill-backups"),
             "cloudflare_r2_access_key_set": bool(self._setting("backup.cloudflare_r2.access_key_id", "")),
             "cloudflare_r2_secret_key_set": bool(self._setting("backup.cloudflare_r2.secret_access_key", "")),
+            "cloudflare_r2_last_error": self._setting("backup.cloudflare_r2.last_error", ""),
+            "telegram_chat_id": self._setting("backup.telegram.chat_id", ""),
+            "telegram_bot_token_set": bool(self._setting("backup.telegram.bot_token", "") or os.getenv("BACKUP_TELEGRAM_BOT_TOKEN", "")),
+            "telegram_last_error": self._setting("backup.telegram.last_error", ""),
+            "telegram_latest": {
+                category: {
+                    "file_name": self._setting(f"backup.telegram.latest.{category}.file_name", ""),
+                    "file_id_set": bool(self._setting(f"backup.telegram.latest.{category}.file_id", "")),
+                }
+                for category in ADMIN_BACKUP_CATEGORIES
+            },
             "rclone_binary": shutil.which("rclone") or "",
             "rclone_config_path": str(config_path),
             "rclone_config_exists": config_path.exists(),
@@ -723,6 +770,10 @@ class BackupService:
             self._set_setting("backup.rclone_remote", str(data.get("rclone_remote") or "").strip().rstrip(":"))
         if "rclone_path" in data:
             self._set_setting("backup.rclone_path", str(data.get("rclone_path") or "").strip().strip("/"))
+        if "telegram_chat_id" in data:
+            self._set_setting("backup.telegram.chat_id", str(data.get("telegram_chat_id") or "").strip())
+        if str(data.get("telegram_bot_token") or "").strip():
+            self._set_setting("backup.telegram.bot_token", str(data.get("telegram_bot_token") or "").strip())
         cap_value = data.get("backup_size_cap_mb", data.get("backup_remote_size_cap_mb"))
         if cap_value is not None:
             cap_mb = self._positive_int(cap_value, int(DEFAULT_BACKUP_SIZE_CAP_BYTES / (1024 * 1024)), minimum=0)
@@ -774,14 +825,13 @@ class BackupService:
         self._set_setting("backup.cloudflare_r2.prefix", prefix)
         self._set_setting("backup.cloudflare_r2.access_key_id", access_key_id)
         self._set_setting("backup.cloudflare_r2.secret_access_key", secret_access_key)
-        self._set_setting("backup.rclone_remote", remote)
-        self._set_setting("backup.rclone_path", "/".join(part for part in [bucket, prefix] if part))
 
         config_path = self._rclone_config_path()
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
+        self._write_rclone_remote_section(
+            config_path,
+            remote,
             "\n".join([
-                f"[{remote}]",
                 "type = s3",
                 "provider = Cloudflare",
                 f"access_key_id = {access_key_id}",
@@ -790,7 +840,6 @@ class BackupService:
                 "acl = private",
                 "",
             ]),
-            encoding="utf-8",
         )
         try:
             config_path.chmod(0o600)
@@ -1353,10 +1402,52 @@ class BackupService:
             ],
         }
 
+    def inspect_full_backup(self, backup_path: str | Path) -> dict:
+        """Inspect a full portable snapshot package without restoring it."""
+        backup_path = self._resolve_full_backup_path(backup_path)
+        validation = self.validate_package(backup_path)
+        if not validation.get("ok"):
+            return {"success": False, "error": validation.get("error", "full snapshot validation failed")}
+        manifest = validation.get("manifest") or {}
+        return {
+            "success": True,
+            "type": "full",
+            "path": str(backup_path),
+            "size": backup_path.stat().st_size,
+            "checksum": self._package_checksum(backup_path),
+            "encrypted": backup_path.suffix == ".upbak",
+            "manifest": manifest,
+            "sections": manifest.get("sections", []),
+            "file_count": int(manifest.get("file_count") or 0),
+        }
+
+    def restore_full_backup(self, backup_path: str | Path, *, confirm: str = "") -> dict:
+        """Restore a full portable snapshot package."""
+        if confirm != "RESTORE FULL SNAPSHOT":
+            return {"success": False, "error": "confirmation phrase required"}
+        backup_path = self._resolve_full_backup_path(backup_path)
+        restored = self.restore_package(backup_path)
+        return {
+            "success": restored.get("status") == "completed",
+            "type": "full",
+            "path": str(backup_path),
+            "restored": restored,
+            "error": restored.get("error", ""),
+        }
+
     def list_all_backups(self) -> dict:
         """List all backup files for admin dashboard."""
-        result = {"postgres": [], "system": [], "users": [], "full": []}
-        for category in result:
+        result = {"full": [], "system": [], "users": [], "postgres": []}
+        result["full"] = [
+            {
+                "name": item["name"],
+                "size": item["size_bytes"],
+                "created": item["created"],
+                "encrypted": item["encrypted"],
+            }
+            for item in self.list_backups()
+        ]
+        for category in ("system", "users", "postgres"):
             cat_dir = self._backup_dir / category
             if not cat_dir.exists():
                 continue
@@ -1425,51 +1516,46 @@ class BackupService:
             self._set_setting("backup.rclone_last_error", error)
             return {"success": False, "remote": remote, "error": error}
 
-    def rclone_sync_latest_category(self, category: str) -> dict:
-        """Upload the newest split backup plus latest alias, then prune remote history."""
+    def rclone_sync_latest_category(self, category: str, *, target: str = "rclone") -> dict:
+        """Upload the newest backup plus latest alias, then prune remote history."""
         category = str(category or "").strip().lower()
         if category not in SPLIT_BACKUP_CATEGORIES:
-            return {"success": False, "error": "category must be postgres, system, or users"}
-        category_dir = self._backup_dir / category
-        prefix = self._backup_prefix(category)
-        latest_name = self._latest_backup_filename(category)
-        candidates = sorted(
-            (path for path in category_dir.glob(f"{prefix}*") if path.is_file()),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        newest = candidates[0] if candidates else category_dir / latest_name
+            return {"success": False, "error": "category must be full, system, users, or postgres"}
+        newest = self._newest_backup_for_category(category)
         if not newest.exists():
             return {"success": False, "category": category, "error": f"no local {category} backup found"}
 
-        timestamped = self.rclone_sync_to_name(newest, newest.name)
+        latest_name = self._latest_backup_filename(category, newest)
+        timestamped = self.rclone_sync_to_name(newest, newest.name, target=target)
         if not timestamped.get("success"):
             return {**timestamped, "category": category}
-        latest = self.rclone_sync_to_name(newest, latest_name)
+        latest = self.rclone_sync_to_name(newest, latest_name, target=target)
         if not latest.get("success"):
             return {**latest, "category": category}
-        retention = self.apply_rclone_retention(category)
+        retention = self.apply_rclone_retention(category, target=target)
         return {
             "success": True,
             "category": category,
+            "target": target,
             "uploaded": [timestamped, latest],
             "retention": retention,
             "remote": timestamped.get("remote_base", timestamped.get("remote", "")),
         }
 
-    def rclone_sync_to_name(self, backup_path: str | Path, remote_filename: str) -> dict:
+    def rclone_sync_to_name(self, backup_path: str | Path, remote_filename: str, *, target: str = "rclone") -> dict:
         backup_path = Path(backup_path)
-        remote = self._setting("backup.rclone_remote", "").strip().rstrip(":")
+        target_config = self._rclone_target_config(target)
+        remote = target_config["remote"]
         if not remote:
-            return {"success": False, "remote": "", "error": "No rclone remote configured"}
+            return {"success": False, "remote": "", "target": target_config["target"], "error": target_config["missing_error"]}
         if not backup_path.exists():
-            return {"success": False, "remote": remote, "error": f"backup file not found: {backup_path}"}
+            return {"success": False, "remote": remote, "target": target_config["target"], "error": f"backup file not found: {backup_path}"}
         if not shutil.which("rclone"):
             msg = "rclone binary not found - install rclone in container"
-            self._set_setting("backup.rclone_last_error", msg)
-            return {"success": False, "remote": remote, "error": msg}
+            self._set_rclone_target_error(target_config, msg)
+            return {"success": False, "remote": remote, "target": target_config["target"], "error": msg}
 
-        remote_path = self._setting("backup.rclone_path", "eazyfill-backups").strip().strip("/")
+        remote_path = target_config["path"]
         target = self._rclone_child_target(f"{remote}:{remote_path}" if remote_path else f"{remote}:", remote_filename)
         try:
             result = subprocess.run(
@@ -1480,49 +1566,51 @@ class BackupService:
             )
             if result.returncode != 0:
                 error_msg = (result.stderr or result.stdout or "rclone upload failed")[:1000]
-                self._set_setting("backup.rclone_last_error", error_msg)
-                return {"success": False, "remote": target, "error": error_msg}
-            self._set_setting("backup.rclone_last_error", "")
+                self._set_rclone_target_error(target_config, error_msg)
+                return {"success": False, "remote": target, "target": target_config["target"], "error": error_msg}
+            self._set_rclone_target_error(target_config, "")
             return {
                 "success": True,
                 "remote": target,
                 "remote_base": f"{remote}:{remote_path}" if remote_path else f"{remote}:",
+                "target": target_config["target"],
                 "filename": remote_filename,
                 "size": backup_path.stat().st_size,
             }
         except subprocess.TimeoutExpired:
             msg = "rclone upload timed out (300s)"
-            self._set_setting("backup.rclone_last_error", msg)
-            return {"success": False, "remote": target, "error": msg}
+            self._set_rclone_target_error(target_config, msg)
+            return {"success": False, "remote": target, "target": target_config["target"], "error": msg}
         except Exception as exc:
             error = str(exc)
-            self._set_setting("backup.rclone_last_error", error)
-            return {"success": False, "remote": target, "error": error}
+            self._set_rclone_target_error(target_config, error)
+            return {"success": False, "remote": target, "target": target_config["target"], "error": error}
 
-    def apply_rclone_retention(self, category: str) -> dict:
+    def apply_rclone_retention(self, category: str, *, target: str = "rclone") -> dict:
         category = str(category or "").strip().lower()
         if category not in SPLIT_BACKUP_CATEGORIES:
-            return {"success": False, "error": "category must be postgres, system, or users"}
-        remote = self._setting("backup.rclone_remote", "").strip().rstrip(":")
+            return {"success": False, "error": "category must be full, system, users, or postgres"}
+        target_config = self._rclone_target_config(target)
+        remote = target_config["remote"]
         if not remote:
-            return {"success": False, "remote": "", "error": "No rclone remote configured"}
+            return {"success": False, "remote": "", "target": target_config["target"], "error": target_config["missing_error"]}
         if not shutil.which("rclone"):
             msg = "rclone binary not found - install rclone in container"
-            self._set_setting("backup.rclone_last_error", msg)
-            return {"success": False, "remote": remote, "error": msg}
+            self._set_rclone_target_error(target_config, msg)
+            return {"success": False, "remote": remote, "target": target_config["target"], "error": msg}
 
-        remote_path = self._setting("backup.rclone_path", "eazyfill-backups").strip().strip("/")
+        remote_path = target_config["path"]
         target_dir = f"{remote}:{remote_path}" if remote_path else f"{remote}:"
         cap_bytes = self._backup_size_cap_bytes()
         threshold = int(cap_bytes * REMOTE_BACKUP_SIZE_PRUNE_RATIO) if cap_bytes else 0
 
-        files = self._rclone_list_files(target_dir)
+        files = self._rclone_list_files(target_dir, error_key=target_config["last_error_key"])
         if files is None:
-            return {"success": False, "remote": target_dir, "error": self._setting("backup.rclone_last_error", "rclone list failed")}
+            return {"success": False, "remote": target_dir, "target": target_config["target"], "error": self._setting(target_config["last_error_key"], "rclone list failed")}
 
         managed = [
             item for item in files
-            if str(item.get("Path", "")).startswith(("postgres_", "system_", "users_"))
+            if str(item.get("Path", "")).startswith(("backup_", "postgres_", "system_", "users_"))
         ]
         managed.sort(key=lambda item: str(item.get("ModTime") or ""), reverse=True)
         newest_by_prefix: dict[str, str] = {}
@@ -1532,7 +1620,7 @@ class BackupService:
             newest_by_prefix.setdefault(prefix, path)
         counted_files = [
             item for item in files
-            if str(item.get("Path", "")).startswith(("postgres_", "system_", "users_", "latest_"))
+            if str(item.get("Path", "")).startswith(("backup_", "postgres_", "system_", "users_", "latest_"))
         ]
         total_size = sum(int(item.get("Size") or 0) for item in counted_files)
         deleted: list[str] = []
@@ -1547,7 +1635,7 @@ class BackupService:
             item_prefix = self._managed_backup_prefix_for_path(item_path)
             if newest_by_prefix.get(item_prefix) == item_path:
                 continue
-            if self._rclone_delete_file(target_dir, item_path):
+            if self._rclone_delete_file(target_dir, item_path, error_key=target_config["last_error_key"]):
                 deleted.append(str(item.get("Path", "")))
                 total_size -= int(item.get("Size") or 0)
 
@@ -1555,6 +1643,7 @@ class BackupService:
             "success": True,
             "remote": target_dir,
             "category": category,
+            "target": target_config["target"],
             "retention_strategy": "size_cap",
             "size_cap_bytes": cap_bytes,
             "size_prune_threshold_bytes": threshold,
@@ -1562,7 +1651,7 @@ class BackupService:
             "remaining_size_bytes_estimate": max(0, total_size),
         }
 
-    def _rclone_list_files(self, target_dir: str) -> list[dict[str, Any]] | None:
+    def _rclone_list_files(self, target_dir: str, *, error_key: str = "backup.rclone_last_error") -> list[dict[str, Any]] | None:
         try:
             result = subprocess.run(
                 self._rclone_command("lsjson", target_dir, "--files-only"),
@@ -1572,16 +1661,16 @@ class BackupService:
             )
             if result.returncode != 0:
                 error_msg = (result.stderr or result.stdout or "rclone lsjson failed")[:1000]
-                self._set_setting("backup.rclone_last_error", error_msg)
+                self._set_setting(error_key, error_msg)
                 return None
             payload = json.loads(result.stdout or "[]")
-            self._set_setting("backup.rclone_last_error", "")
+            self._set_setting(error_key, "")
             return payload if isinstance(payload, list) else []
         except Exception as exc:
-            self._set_setting("backup.rclone_last_error", str(exc))
+            self._set_setting(error_key, str(exc))
             return None
 
-    def _rclone_delete_file(self, target_dir: str, filename: str) -> bool:
+    def _rclone_delete_file(self, target_dir: str, filename: str, *, error_key: str = "backup.rclone_last_error") -> bool:
         if not filename or "/" in filename:
             return False
         target = self._rclone_child_target(target_dir, filename)
@@ -1593,11 +1682,11 @@ class BackupService:
                 timeout=60,
             )
             if result.returncode != 0:
-                self._set_setting("backup.rclone_last_error", (result.stderr or result.stdout or "rclone delete failed")[:1000])
+                self._set_setting(error_key, (result.stderr or result.stdout or "rclone delete failed")[:1000])
                 return False
             return True
         except Exception as exc:
-            self._set_setting("backup.rclone_last_error", str(exc))
+            self._set_setting(error_key, str(exc))
             return False
 
     @staticmethod
@@ -1610,85 +1699,292 @@ class BackupService:
     @staticmethod
     def _backup_prefix(category: str) -> str:
         return {
+            "full": "backup_",
             "postgres": "postgres_",
             "system": "system_",
             "users": "users_",
         }[category]
 
     @staticmethod
-    def _latest_backup_filename(category: str) -> str:
+    def _latest_backup_filename(category: str, source_path: str | Path | None = None) -> str:
+        suffix = Path(source_path).suffix if source_path is not None else ".upbak"
         return {
+            "full": "latest_full.zip" if suffix == ".zip" else "latest_full.upbak",
             "postgres": "latest_postgres.dump",
             "system": "latest_system.tar.gz",
             "users": "latest_users.json.gz",
         }[category]
 
     @staticmethod
+    def _latest_backup_filenames(category: str) -> list[str]:
+        if category == "full":
+            return ["latest_full.upbak", "latest_full.zip"]
+        return [BackupService._latest_backup_filename(category)]
+
+    @staticmethod
     def _managed_backup_prefix_for_path(path: str) -> str:
+        if path.startswith("backup_"):
+            return "backup_"
         if path.startswith("postgres_"):
             return "postgres_"
         if path.startswith("system_"):
             return "system_"
         return "users_"
 
-    def rclone_pull_latest(self, category: str) -> dict:
-        """Download the latest split backup for a category from the rclone remote."""
+    def rclone_pull_latest(self, category: str, *, target: str = "rclone") -> dict:
+        """Download the latest backup for a category from the rclone remote."""
         category = str(category or "").strip().lower()
         if category not in SPLIT_BACKUP_CATEGORIES:
-            return {"success": False, "error": "category must be postgres, system, or users"}
-        remote = self._setting("backup.rclone_remote", "").strip().rstrip(":")
+            return {"success": False, "error": "category must be full, system, users, or postgres"}
+        target_config = self._rclone_target_config(target)
+        remote = target_config["remote"]
         if not remote:
-            return {"success": False, "remote": "", "error": "No rclone remote configured"}
+            return {"success": False, "remote": "", "target": target_config["target"], "error": target_config["missing_error"]}
         if not shutil.which("rclone"):
             msg = "rclone binary not found - install rclone in container"
-            self._set_setting("backup.rclone_last_error", msg)
-            return {"success": False, "remote": remote, "error": msg}
+            self._set_rclone_target_error(target_config, msg)
+            return {"success": False, "remote": remote, "target": target_config["target"], "error": msg}
 
-        remote_path = self._setting("backup.rclone_path", "eazyfill-backups").strip().strip("/")
-        filename = self._latest_backup_filename(category)
-        local_dir = self._backup_dir / category
+        remote_path = target_config["path"]
+        local_dir = self._backup_category_dir(category)
         local_dir.mkdir(parents=True, exist_ok=True)
-        destination = local_dir / filename
-        source = f"{remote}:{remote_path}/{filename}" if remote_path else f"{remote}:{filename}"
-        try:
-            result = subprocess.run(
-                self._rclone_command("copyto", source, str(destination), "--log-level", "ERROR"),
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if result.returncode != 0:
-                error_msg = (result.stderr or result.stdout or "rclone download failed")[:1000]
-                self._set_setting("backup.rclone_last_error", error_msg)
-                return {"success": False, "remote": source, "error": error_msg}
-            self._set_setting("backup.rclone_last_error", "")
-            return {
-                "success": True,
-                "category": category,
-                "remote": source,
-                "path": str(destination),
-                "size": destination.stat().st_size if destination.exists() else 0,
-            }
-        except subprocess.TimeoutExpired:
-            msg = "rclone download timed out (300s)"
-            self._set_setting("backup.rclone_last_error", msg)
-            return {"success": False, "remote": source, "error": msg}
-        except Exception as exc:
-            error = str(exc)
-            self._set_setting("backup.rclone_last_error", error)
-            return {"success": False, "remote": source, "error": error}
+        errors: list[str] = []
+        for filename in self._latest_backup_filenames(category):
+            destination = local_dir / filename
+            source = f"{remote}:{remote_path}/{filename}" if remote_path else f"{remote}:{filename}"
+            try:
+                result = subprocess.run(
+                    self._rclone_command("copyto", source, str(destination), "--log-level", "ERROR"),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode != 0:
+                    error_msg = (result.stderr or result.stdout or "rclone download failed")[:1000]
+                    errors.append(f"{filename}: {error_msg}")
+                    destination.unlink(missing_ok=True)
+                    continue
+                self._set_rclone_target_error(target_config, "")
+                return {
+                    "success": True,
+                    "category": category,
+                    "target": target_config["target"],
+                    "remote": source,
+                    "path": str(destination),
+                    "size": destination.stat().st_size if destination.exists() else 0,
+                }
+            except subprocess.TimeoutExpired:
+                errors.append(f"{filename}: rclone download timed out (300s)")
+                destination.unlink(missing_ok=True)
+            except Exception as exc:
+                errors.append(f"{filename}: {exc}")
+                destination.unlink(missing_ok=True)
+        error = "; ".join(errors) or "rclone download failed"
+        self._set_rclone_target_error(target_config, error)
+        return {"success": False, "remote": f"{remote}:{remote_path}", "target": target_config["target"], "error": error}
 
-    def rclone_restore_latest(self, category: str) -> dict:
-        pulled = self.rclone_pull_latest(category)
+    def rclone_restore_latest(self, category: str, *, target: str = "rclone", confirm: str = "") -> dict:
+        pulled = self.rclone_pull_latest(category, target=target)
         if not pulled.get("success"):
             return pulled
-        if category == "system":
-            restored = self.restore_system_backup(pulled["path"])
-        elif category == "postgres":
-            restored = self.restore_postgres_backup(pulled["path"], confirm="RESTORE POSTGRES")
-        else:
-            restored = self.restore_user_backup(pulled["path"])
+        restored = self._restore_category_backup(category, pulled["path"], confirm=confirm)
         return {"success": bool(restored.get("success")), "pulled": pulled, "restored": restored}
+
+    def telegram_sync_latest_category(self, category: str) -> dict:
+        category = str(category or "").strip().lower()
+        if category not in ADMIN_BACKUP_CATEGORIES:
+            return {"success": False, "error": "category must be full, system, or users"}
+        config = self._telegram_config()
+        if not config["bot_token"] or not config["chat_id"]:
+            return {"success": False, "target": "telegram", "error": "Telegram bot token and chat ID are required"}
+        newest = self._newest_backup_for_category(category)
+        if not newest.exists():
+            return {"success": False, "target": "telegram", "category": category, "error": f"no local {category} backup found"}
+        if self._telegram_uses_public_api() and newest.stat().st_size > TELEGRAM_PUBLIC_SEND_LIMIT_BYTES:
+            return {
+                "success": False,
+                "target": "telegram",
+                "category": category,
+                "error": "Telegram public Bot API upload limit is 50 MB; use rclone/R2 for this backup or configure a local Bot API server",
+            }
+        caption = f"EazyFill {category} backup: {newest.name}"
+        url = f"{self._telegram_api_base()}/bot{config['bot_token']}/sendDocument"
+        try:
+            with newest.open("rb") as fh:
+                response = httpx.post(
+                    url,
+                    data={"chat_id": config["chat_id"], "caption": caption},
+                    files={"document": (newest.name, fh, "application/octet-stream")},
+                    timeout=300,
+                )
+            payload = response.json() if response.content else {}
+            if response.status_code >= 400 or not payload.get("ok"):
+                error = str(payload.get("description") or response.text or "Telegram upload failed")[:1000]
+                self._set_setting("backup.telegram.last_error", error)
+                return {"success": False, "target": "telegram", "category": category, "error": error}
+            document = payload.get("result", {}).get("document", {})
+            file_id = document.get("file_id", "")
+            if not file_id:
+                error = "Telegram upload succeeded but no file_id was returned"
+                self._set_setting("backup.telegram.last_error", error)
+                return {"success": False, "target": "telegram", "category": category, "error": error}
+            self._set_setting(f"backup.telegram.latest.{category}.file_id", file_id)
+            self._set_setting(f"backup.telegram.latest.{category}.file_name", newest.name)
+            self._set_setting("backup.telegram.last_error", "")
+            return {
+                "success": True,
+                "target": "telegram",
+                "category": category,
+                "filename": newest.name,
+                "file_id": file_id,
+                "size": newest.stat().st_size,
+            }
+        except Exception as exc:
+            error = str(exc)
+            self._set_setting("backup.telegram.last_error", error)
+            return {"success": False, "target": "telegram", "category": category, "error": error}
+
+    def telegram_pull_latest(self, category: str) -> dict:
+        category = str(category or "").strip().lower()
+        if category not in ADMIN_BACKUP_CATEGORIES:
+            return {"success": False, "error": "category must be full, system, or users"}
+        config = self._telegram_config()
+        if not config["bot_token"]:
+            return {"success": False, "target": "telegram", "error": "Telegram bot token is required"}
+        file_id = self._setting(f"backup.telegram.latest.{category}.file_id", "").strip()
+        filename = self._setting(f"backup.telegram.latest.{category}.file_name", self._latest_backup_filename(category)).strip()
+        if not file_id:
+            return {"success": False, "target": "telegram", "category": category, "error": "No Telegram file_id is stored for this backup category"}
+        try:
+            file_response = httpx.get(
+                f"{self._telegram_api_base()}/bot{config['bot_token']}/getFile",
+                params={"file_id": file_id},
+                timeout=30,
+            )
+            file_payload = file_response.json() if file_response.content else {}
+            if file_response.status_code >= 400 or not file_payload.get("ok"):
+                error = str(file_payload.get("description") or file_response.text or "Telegram getFile failed")[:1000]
+                self._set_setting("backup.telegram.last_error", error)
+                return {"success": False, "target": "telegram", "category": category, "error": error}
+            file_path = file_payload.get("result", {}).get("file_path", "")
+            if not file_path:
+                return {"success": False, "target": "telegram", "category": category, "error": "Telegram did not return a file path"}
+            file_size = int(file_payload.get("result", {}).get("file_size") or 0)
+            if self._telegram_uses_public_api() and file_size > TELEGRAM_PUBLIC_DOWNLOAD_LIMIT_BYTES:
+                return {
+                    "success": False,
+                    "target": "telegram",
+                    "category": category,
+                    "error": "Telegram public Bot API download limit is 20 MB; use rclone/R2 for restore or configure a local Bot API server",
+                }
+            download = httpx.get(
+                f"{self._telegram_file_base()}/bot{config['bot_token']}/{file_path}",
+                timeout=300,
+            )
+            if download.status_code >= 400:
+                error = (download.text or "Telegram download failed")[:1000]
+                self._set_setting("backup.telegram.last_error", error)
+                return {"success": False, "target": "telegram", "category": category, "error": error}
+            local_dir = self._backup_category_dir(category)
+            local_dir.mkdir(parents=True, exist_ok=True)
+            destination = local_dir / Path(filename).name
+            destination.write_bytes(download.content)
+            self._set_setting("backup.telegram.last_error", "")
+            return {
+                "success": True,
+                "target": "telegram",
+                "category": category,
+                "path": str(destination),
+                "filename": destination.name,
+                "size": destination.stat().st_size,
+            }
+        except Exception as exc:
+            error = str(exc)
+            self._set_setting("backup.telegram.last_error", error)
+            return {"success": False, "target": "telegram", "category": category, "error": error}
+
+    def telegram_restore_latest(self, category: str, *, confirm: str = "") -> dict:
+        pulled = self.telegram_pull_latest(category)
+        if not pulled.get("success"):
+            return pulled
+        restored = self._restore_category_backup(category, pulled["path"], confirm=confirm)
+        return {"success": bool(restored.get("success")), "pulled": pulled, "restored": restored}
+
+    def _restore_category_backup(self, category: str, backup_path: str | Path, *, confirm: str = "") -> dict:
+        category = str(category or "").strip().lower()
+        if category == "full":
+            return self.restore_full_backup(backup_path, confirm=confirm)
+        if category == "system":
+            return self.restore_system_backup(backup_path)
+        if category == "postgres":
+            return self.restore_postgres_backup(backup_path, confirm=confirm or "RESTORE POSTGRES")
+        return self.restore_user_backup(backup_path)
+
+    def _backup_category_dir(self, category: str) -> Path:
+        if category == "full":
+            return self._backup_dir
+        return self._backup_dir / category
+
+    def _newest_backup_for_category(self, category: str) -> Path:
+        category = str(category or "").strip().lower()
+        category_dir = self._backup_category_dir(category)
+        prefix = self._backup_prefix(category)
+        suffixes = {".upbak", ".zip"} if category == "full" else None
+        candidates = []
+        if category_dir.exists():
+            for path in category_dir.glob(f"{prefix}*"):
+                if not path.is_file() or path.name.startswith("latest"):
+                    continue
+                if suffixes and path.suffix not in suffixes:
+                    continue
+                candidates.append(path)
+        if candidates:
+            return sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)[0]
+        for latest_name in self._latest_backup_filenames(category):
+            latest = category_dir / latest_name
+            if latest.exists():
+                return latest
+        return category_dir / self._latest_backup_filename(category)
+
+    def _rclone_target_config(self, target: str = "rclone") -> dict[str, str]:
+        normalized = str(target or "rclone").strip().lower().replace("-", "_")
+        normalized = "r2" if normalized in {"r2", "cloudflare", "cloudflare_r2"} else "rclone"
+        if normalized == "r2":
+            remote = self._setting("backup.cloudflare_r2.remote", "cloudflare-r2").strip().rstrip(":")
+            bucket = self._setting("backup.cloudflare_r2.bucket", "").strip().strip("/")
+            prefix = self._setting("backup.cloudflare_r2.prefix", "eazyfill-backups").strip().strip("/")
+            return {
+                "target": "r2",
+                "remote": remote,
+                "path": "/".join(part for part in [bucket, prefix] if part),
+                "last_error_key": "backup.cloudflare_r2.last_error",
+                "missing_error": "Cloudflare R2 remote and bucket are not configured",
+            }
+        return {
+            "target": "rclone",
+            "remote": self._setting("backup.rclone_remote", "").strip().rstrip(":"),
+            "path": self._setting("backup.rclone_path", "eazyfill-backups").strip().strip("/"),
+            "last_error_key": "backup.rclone_last_error",
+            "missing_error": "No rclone remote configured",
+        }
+
+    def _set_rclone_target_error(self, target_config: dict[str, str], error: str) -> None:
+        self._set_setting(target_config.get("last_error_key", "backup.rclone_last_error"), error)
+
+    def _telegram_config(self) -> dict[str, str]:
+        return {
+            "bot_token": os.getenv("BACKUP_TELEGRAM_BOT_TOKEN", "").strip() or self._setting("backup.telegram.bot_token", "").strip(),
+            "chat_id": os.getenv("BACKUP_TELEGRAM_CHAT_ID", "").strip() or self._setting("backup.telegram.chat_id", "").strip(),
+        }
+
+    def _telegram_api_base(self) -> str:
+        return os.getenv("BACKUP_TELEGRAM_API_BASE", "https://api.telegram.org").strip().rstrip("/")
+
+    def _telegram_file_base(self) -> str:
+        return os.getenv("BACKUP_TELEGRAM_FILE_BASE", f"{self._telegram_api_base()}/file").strip().rstrip("/")
+
+    def _telegram_uses_public_api(self) -> bool:
+        return self._telegram_api_base() == "https://api.telegram.org"
 
     def _export_table_rows(self, table_name: str) -> list[dict[str, Any]]:
         engine = get_engine()
@@ -1836,6 +2132,20 @@ class BackupService:
             "api_keys: added disabled placeholder parent rows for missing referenced "
             f"legacy key ids: {', '.join(str(item) for item in missing_ids)}"
         )
+
+    def _resolve_full_backup_path(self, backup_path: str | Path) -> Path:
+        path = Path(backup_path)
+        if not path.is_absolute():
+            path = self._backup_dir / path
+        resolved = path.resolve()
+        backup_dir = self._backup_dir.resolve()
+        if resolved != backup_dir and backup_dir not in resolved.parents:
+            raise ValueError("backup path outside full backup directory")
+        if not resolved.exists() or not resolved.is_file():
+            raise FileNotFoundError(f"backup not found: {path}")
+        if resolved.suffix not in {".upbak", ".zip"}:
+            raise ValueError("full snapshot must be a .upbak or .zip package")
+        return resolved
 
     def _resolve_split_backup_path(self, category: str, backup_path: str | Path) -> Path:
         path = Path(backup_path)

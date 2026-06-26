@@ -96,14 +96,21 @@ def test_cloudflare_r2_preset_writes_s3_rclone_config(tmp_path, monkeypatch):
         "cloudflare_r2_secret_access_key": "secret123",
     })
 
-    assert store["backup.rclone_remote"] == "r2"
-    assert store["backup.rclone_path"] == "eazyfill/prod"
+    assert store["backup.cloudflare_r2.remote"] == "r2"
+    assert store["backup.cloudflare_r2.bucket"] == "eazyfill"
+    assert "backup.rclone_remote" not in store
     assert result["cloudflare_r2_access_key_set"] is True
     assert result["cloudflare_r2_secret_key_set"] is True
     text = config_path.read_text(encoding="utf-8")
     assert "[r2]" in text
     assert "provider = Cloudflare" in text
     assert "endpoint = https://account123.r2.cloudflarestorage.com" in text
+
+
+def test_default_backup_retention_cap_is_two_gb(tmp_path, monkeypatch):
+    service, _store, _config_path = _service(tmp_path, monkeypatch)
+
+    assert service._backup_size_cap_bytes() == 2 * 1024 * 1024 * 1024
 
 
 def test_blank_cloudflare_fields_do_not_break_plain_rclone_save(tmp_path, monkeypatch):
@@ -269,6 +276,40 @@ def test_rclone_sync_latest_category_uploads_history_latest_and_prunes_by_size_c
     assert delete_commands == [
         ["rclone", "--config", str(config_path), "deletefile", "r2:eazyfill/prod/system_20260608_120000.tar.gz"]
     ]
+
+
+def test_full_backup_list_reads_root_packages_and_rclone_uploads_latest_alias(tmp_path, monkeypatch):
+    service, store, config_path = _service(tmp_path, monkeypatch)
+    store["backup.rclone_remote"] = "gdrive"
+    store["backup.rclone_path"] = "eazyfill/prod"
+    config_path.write_text("[gdrive]\ntype = drive\n", encoding="utf-8")
+    full = service._backup_dir / "backup_20260610_120000.upbak"
+    full.write_bytes(b"full")
+    commands = []
+
+    class Result:
+        def __init__(self, stdout="", returncode=0):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        if "lsjson" in cmd:
+            return Result(stdout='[{"Path":"backup_20260610_120000.upbak","Size":4,"ModTime":"2026-06-10T12:00:00Z"}]')
+        return Result()
+
+    monkeypatch.setattr(backup_service.shutil, "which", lambda _name: "/usr/bin/rclone")
+    monkeypatch.setattr(backup_service.subprocess, "run", fake_run)
+
+    listed = service.list_all_backups()
+    result = service.rclone_sync_latest_category("full")
+
+    assert listed["full"][0]["name"] == full.name
+    assert result["success"] is True
+    copy_commands = [cmd for cmd in commands if "copyto" in cmd]
+    assert copy_commands[0][4:] == [str(full), "gdrive:eazyfill/prod/backup_20260610_120000.upbak", "--log-level", "ERROR"]
+    assert copy_commands[1][4:] == [str(full), "gdrive:eazyfill/prod/latest_full.upbak", "--log-level", "ERROR"]
 
 
 def test_create_postgres_backup_uses_pg_dump_and_verifies_dump(tmp_path, monkeypatch):

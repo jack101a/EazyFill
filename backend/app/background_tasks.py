@@ -82,18 +82,22 @@ async def backup_scheduler(container) -> None:
             if not claimed:
                 continue
             try:
-                if getattr(container.settings.storage, "db_type", "") == "postgresql":
-                    pg_result = container.backup_service.create_postgres_backup()
-                    if not pg_result.get("success"):
-                        logger.warning("postgres_backup_failed", extra={"context": pg_result})
+                full_result = container.backup_service.full_backup()
+                if full_result.get("status") != "completed":
+                    logger.warning("full_backup_failed", extra={"context": full_result})
                 container.backup_service.create_system_backup()
                 container.backup_service.create_user_backup()
 
-                for category in ["postgres", "system", "users"]:
+                for category in ["full", "system", "users"]:
+                    for target in ["rclone", "r2"]:
+                        try:
+                            container.backup_service.rclone_sync_latest_category(category, target=target)
+                        except Exception as exc:
+                            logger.warning("backup_rclone_skip: %s", exc)
                     try:
-                        container.backup_service.rclone_sync_latest_category(category)
+                        container.backup_service.telegram_sync_latest_category(category)
                     except Exception as exc:
-                        logger.warning("backup_rclone_skip: %s", exc)
+                        logger.warning("backup_telegram_skip: %s", exc)
             finally:
                 await _release_redis_lock(lock_client, lock_key, lock_token)
 

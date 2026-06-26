@@ -16,15 +16,19 @@ const [
   app,
   navigation,
   apiClient,
+  backupClient,
   overviewPage,
   operationsPage,
+  backupsPage,
   plansPanel,
 ] = await Promise.all([
   readSource("src/app/App.jsx"),
   readSource("src/app/navigation.js"),
   readSource("src/api/eazyfill.js"),
+  readSource("src/api/backups.js"),
   readSource("src/app/features/overview/EazyFillOverviewPage.jsx"),
   readSource("src/app/features/operations/OperationsPage.jsx"),
+  readSource("src/app/features/backups/BackupsPage.jsx"),
   readSource("src/app/components/PlansPanel.jsx"),
 ]);
 
@@ -34,6 +38,7 @@ for (const route of [
   "/plans",
   "/payments",
   "/operations",
+  "/backups",
   "/extension-health",
   "/captcha-models",
 ]) {
@@ -43,6 +48,7 @@ for (const route of [
 for (const route of [
   '<Route path="/dashboard" element={<EazyFillOverviewPage />} />',
   '<Route path="/operations" element={<OperationsPage />} />',
+  '<Route path="/backups" element={<BackupsPage />} />',
   '<Route path="/captcha-models" element={<CaptchaModelsPage showToast={context.showToast} />} />',
 ]) {
   assert.ok(app.includes(route), `app routes should include ${route}`);
@@ -77,8 +83,11 @@ for (const feature of ["captcha", "autofill", "userscripts", "sync", "priority_s
 assert.ok(apiClient.includes('adminApi("/eazyfill/overview")'), "overview client should use the EazyFill admin route");
 assert.ok(apiClient.includes('adminApi("/eazyfill/abuse")'), "abuse client should use the EazyFill admin route");
 assert.ok(apiClient.includes("eazyfillQueryKeys"), "API cache keys should use the EazyFill namespace");
+assert.ok(backupClient.includes('adminApi("/backups/telegram-sync")'), "backup client should expose Telegram sync");
+assert.ok(backupClient.includes('adminApi("/backups/rclone-sync")'), "backup client should expose rclone/R2 sync");
 assert.ok(overviewPage.includes("EazyFill Operations"), "overview page should use current product copy");
 assert.ok(operationsPage.includes("fetchEazyFillAbuse"), "operations page should use the current API client");
+assert.ok(backupsPage.includes("Full Snapshot"), "backups page should expose full snapshot backup scope");
 
 assert.ok(plansPanel.includes("DEFAULT_PLAN_ALLOWED_SERVICES"), "plans panel should use the shared entitlement defaults");
 assert.ok(plansPanel.includes("EAZYFILL_FEATURE_FLAGS"), "plans panel should render shared feature flags");

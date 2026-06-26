@@ -10,6 +10,7 @@ import { COMPATIBILITY_REDIRECTS } from "./navigation";
 
 const EazyFillOverviewPage = React.lazy(() => import("./features/overview/EazyFillOverviewPage").then((module) => ({ default: module.EazyFillOverviewPage })));
 const OperationsPage = React.lazy(() => import("./features/operations/OperationsPage").then((module) => ({ default: module.OperationsPage })));
+const BackupsPage = React.lazy(() => import("./features/backups/BackupsPage").then((module) => ({ default: module.BackupsPage })));
 const UsersPanel = React.lazy(() => import("./components/UsersPanel").then((module) => ({ default: module.UsersPanel })));
 const PlansPanel = React.lazy(() => import("./components/PlansPanel").then((module) => ({ default: module.PlansPanel })));
 const PaymentsPanel = React.lazy(() => import("./components/PaymentsPanel").then((module) => ({ default: module.PaymentsPanel })));
@@ -34,6 +35,7 @@ function AppRoutes() {
           <Route path="/plans" element={<PlansPanel showToast={context.showToast} />} />
           <Route path="/payments" element={<PaymentsPanel showToast={context.showToast} />} />
           <Route path="/operations" element={<OperationsPage />} />
+          <Route path="/backups" element={<BackupsPage />} />
           <Route path="/extension-health" element={<ExtensionHealthPanel showToast={context.showToast} />} />
           <Route path="/captcha-models" element={<CaptchaModelsPage showToast={context.showToast} />} />
 

@@ -3,6 +3,7 @@ import {
   BrainCircuit,
   Bug,
   CreditCard,
+  Database,
   LayoutDashboard,
   Tag,
   Users,
@@ -29,6 +30,7 @@ export const NAV_SECTIONS = [
     label: "Operations",
     items: [
       { path: "/operations", label: "Risk & Abuse", icon: AlertTriangle },
+      { path: "/backups", label: "Backups", icon: Database },
     ],
   },
 ];
