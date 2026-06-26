@@ -85,9 +85,7 @@ class EmailService:
         logo_html = ""
         if logo_url:
             logo_html = f"""
-                    <td width="54" style="width:54px;padding:0 14px 0 0;vertical-align:middle;">
-                      <img src="{html.escape(logo_url, quote=True)}" width="44" height="44" alt="EazyFill" style="display:block;width:44px;height:44px;border:0;outline:none;text-decoration:none;">
-                    </td>"""
+                  <img src="{html.escape(logo_url, quote=True)}" width="170" alt="EazyFill" style="display:block;width:170px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;">"""
         html_content = f"""<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#172033;">
@@ -96,15 +94,9 @@ class EmailService:
         <td align="center">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
             <tr>
-              <td style="padding:28px 32px 18px;border-bottom:1px solid #edf2f7;">
-                <table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-                  <tr>{logo_html}
-                    <td style="vertical-align:middle;">
-                      <div style="font-size:20px;font-weight:700;color:#0f172a;">EazyFill</div>
-                      <div style="margin-top:6px;font-size:14px;color:#64748b;">Secure account verification</div>
-                    </td>
-                  </tr>
-                </table>
+              <td style="padding:24px 32px 20px;background:#120827;border-bottom:1px solid #2b1554;">
+                {logo_html}
+                <div style="margin-top:10px;font-size:14px;color:#d8d1ff;">Secure account verification</div>
               </td>
             </tr>
             <tr>
@@ -142,4 +134,4 @@ class EmailService:
         base_url = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
         if not base_url.lower().startswith(("https://", "http://")):
             return ""
-        return f"{base_url}/static/brand/server-avatar-256.png"
+        return f"{base_url}/static/brand/email-logo-light.png"

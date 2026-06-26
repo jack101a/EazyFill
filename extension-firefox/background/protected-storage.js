@@ -246,10 +246,23 @@ export function resetProtectedStorageMemo() {
 }
 
 export async function factoryResetLocalExtensionStorage() {
+  const current = await getExtensionStorage(["fp_auth", "fp_settings"]);
+  const preserved = {};
+  if (current.fp_auth && typeof current.fp_auth === "object" && Object.keys(current.fp_auth).length) {
+    preserved.fp_auth = current.fp_auth;
+  }
+  const settings = current.fp_settings && typeof current.fp_settings === "object" ? current.fp_settings : {};
+  const preservedSettings = {};
+  for (const key of ["apiBaseUrl", "theme", "syncEnabled", "seenWelcome"]) {
+    if (settings[key] !== undefined) preservedSettings[key] = settings[key];
+  }
+  if (Object.keys(preservedSettings).length) preserved.fp_settings = preservedSettings;
+
   resetProtectedStorageMemo();
   await Promise.all([
     chrome.storage.local.clear(),
     chrome.storage.session?.clear ? chrome.storage.session.clear() : Promise.resolve()
   ]);
   resetProtectedStorageMemo();
+  if (Object.keys(preserved).length) await setExtensionStorage(preserved);
 }

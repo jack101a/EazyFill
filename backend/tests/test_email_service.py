@@ -62,7 +62,9 @@ def test_brevo_otp_email_payload_uses_eazyfill_sender(monkeypatch):
     assert payload["replyTo"] == {"email": "support.eazyfill@002529.xyz", "name": "EazyFill Support"}
     assert payload["to"] == [{"email": "user@example.com"}]
     assert "123456" in payload["htmlContent"]
-    assert "https://eazyfill.test/static/brand/server-avatar-256.png" in payload["htmlContent"]
+    assert "https://eazyfill.test/static/brand/email-logo-light.png" in payload["htmlContent"]
+    assert "server-avatar-256.png" not in payload["htmlContent"]
+    assert "background:#120827" in payload["htmlContent"]
     assert "Secure account verification" in payload["htmlContent"]
     assert "Sent by EazyFill at" not in payload["htmlContent"]
     assert payload["textContent"] == "Your EazyFill verification code is 123456. It expires in 10 minutes."

@@ -385,6 +385,9 @@ try {
   assert.equal(await optionsPage.locator("#panel-title").innerText(), "Overview");
   await captureSnapshot(optionsPage, "options-overview");
   assert.equal(await optionsPage.locator("#overview-userscript-alert").isHidden(), true);
+  assert.equal(await optionsPage.getByText("Live Activity & Status").count(), 0);
+  assert.equal(await optionsPage.getByText("System is connected and standing by").count(), 0);
+  assert.equal(await optionsPage.getByText("Autofill automation engine running").count(), 0);
   assert.equal(await optionsPage.locator('.nav-item[data-panel="billing-panel"]').count(), 0);
   await optionsPage.locator('.nav-item[data-panel="account-panel"]').click();
   await optionsPage.waitForSelector("#account-panel.active");

@@ -16,6 +16,9 @@ function storageArea(store) {
     },
     async remove(keys) {
       for (const key of Array.isArray(keys) ? keys : [keys]) store.delete(key);
+    },
+    async clear() {
+      store.clear();
     }
   };
 }
@@ -284,5 +287,48 @@ response = await send({
 }, optionsSender);
 assert.equal(response.ok, false);
 assert.match(response.error, /requires a values object/);
+
+response = await send({
+  type: "SET_EXTENSION_STORAGE",
+  values: {
+    fp_auth: { sessionToken: "preserved-session", valid: true, user: { email: "user@example.com" } },
+    fp_settings: {
+      apiBaseUrl: "https://api.example.test",
+      theme: "dark",
+      syncEnabled: true,
+      autofillEnabled: true
+    },
+    fp_credits: { captcha: { remaining: 20 } },
+    fp_rules: [{ id: "local-rule" }],
+    fp_scripts: [{ id: "local-script" }],
+    fp_profiles: [{ id: "local-profile" }],
+    fp_captcha_selectors: { "example.com": { routes: {} } },
+    fp_sync_meta: { lastSyncAt: 123 }
+  }
+}, optionsSender);
+assert.equal(response.ok, true);
+
+response = await send({ type: "FACTORY_RESET_LOCAL" }, contentSender);
+assert.equal(response.ok, false);
+assert.match(response.error, /only the EazyFill popup or options page can reset local data/);
+
+response = await send({ type: "FACTORY_RESET_LOCAL" }, optionsSender);
+assert.equal(response.ok, true);
+response = await send({
+  type: "GET_EXTENSION_STORAGE",
+  keys: ["fp_auth", "fp_settings", "fp_credits", "fp_rules", "fp_scripts", "fp_profiles", "fp_captcha_selectors", "fp_sync_meta"]
+}, optionsSender);
+assert.equal(response.ok, true);
+assert.equal(response.data.fp_auth.sessionToken, "preserved-session");
+assert.equal(response.data.fp_settings.apiBaseUrl, "https://api.example.test");
+assert.equal(response.data.fp_settings.theme, "dark");
+assert.equal(response.data.fp_settings.syncEnabled, true);
+assert.equal(response.data.fp_settings.autofillEnabled, undefined);
+assert.equal(response.data.fp_credits, undefined);
+assert.equal(response.data.fp_rules, undefined);
+assert.equal(response.data.fp_scripts, undefined);
+assert.equal(response.data.fp_profiles, undefined);
+assert.equal(response.data.fp_captcha_selectors, undefined);
+assert.equal(response.data.fp_sync_meta, undefined);
 
 console.log("EAZ-EXT-002 storage ACL tests passed");
