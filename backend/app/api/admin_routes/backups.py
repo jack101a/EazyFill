@@ -439,13 +439,14 @@ async def telegram_pull_latest(request: Request) -> Any:
     denied = _admin_guard(request)
     if denied:
         return denied
-    container = request.app.state.container
-    body = await request.json()
-    category = str(body.get("type", "")).strip().lower()
-    if category not in ADMIN_BACKUP_TYPES:
-        return JSONResponse({"success": False, "error": "type must be 'full', 'system', or 'users'"}, status_code=400)
-    result = container.backup_service.telegram_pull_latest(category)
-    return JSONResponse(result, status_code=200 if result.get("success") else 502)
+    return JSONResponse(
+        {
+            "success": False,
+            "target": "telegram",
+            "error": "Telegram is dump-only for EazyFill backups. Restore from rclone/GDrive or Cloudflare R2.",
+        },
+        status_code=400,
+    )
 
 
 @router.post("/api/backups/telegram-restore-latest")
@@ -453,15 +454,14 @@ async def telegram_restore_latest(request: Request) -> Any:
     denied = _admin_guard(request)
     if denied:
         return denied
-    container = request.app.state.container
-    body = await request.json()
-    category = str(body.get("type", "")).strip().lower()
-    if category not in ADMIN_BACKUP_TYPES:
-        return JSONResponse({"success": False, "error": "type must be 'full', 'system', or 'users'"}, status_code=400)
-    if category == "full" and str(body.get("confirm", "")) != "RESTORE FULL SNAPSHOT":
-        return JSONResponse({"success": False, "error": "confirmation phrase required"}, status_code=400)
-    result = container.backup_service.telegram_restore_latest(category, confirm=str(body.get("confirm", "")))
-    return JSONResponse(result, status_code=200 if result.get("success") else 502)
+    return JSONResponse(
+        {
+            "success": False,
+            "target": "telegram",
+            "error": "Telegram restore is disabled. Restore from rclone/GDrive or Cloudflare R2.",
+        },
+        status_code=400,
+    )
 
 
 @router.get("/api/backups/remote-config")

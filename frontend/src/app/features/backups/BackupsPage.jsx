@@ -41,8 +41,9 @@ const TARGETS = [
   {
     target: "telegram",
     title: "Telegram Dump",
-    description: "Uploads latest backup files to the configured group or channel.",
+    description: "Dump-only copy for small files and alerts. Restore from rclone/GDrive or R2.",
     icon: Send,
+    dumpOnly: true,
   },
   {
     target: "rclone",
@@ -107,7 +108,7 @@ function actionNotice(request, result) {
         text: `${request.target} sync finished with ${failed.length} issue(s): ${failed.map((item) => `${item.category}: ${item.error || "failed"}`).join("; ")}`,
       };
     }
-    return { tone: "success", text: `${request.target} latest backups synced.` };
+    return { tone: "success", text: request.target === "telegram" ? "Latest backups dumped to Telegram." : `${request.target} latest backups synced.` };
   }
   if (result?.success === false || result?.ok === false || result?.status === "failed") {
     return { tone: "error", text: result.error || "Backup action failed." };
@@ -376,25 +377,32 @@ export function BackupsPage() {
                   ) : null}
                   <button type="button" className={solidButton} disabled={busy} onClick={() => mutation.mutate({ action: "remote-sync", target: targetItem.target })}>
                     <CloudUpload size={15} />
-                    Backup Latest
+                    {targetItem.dumpOnly ? "Dump Latest" : "Backup Latest"}
                   </button>
                 </div>
-                <div className="space-y-2">
-                  {BACKUP_TYPES.map((backupType) => (
-                    <div className={`flex flex-wrap items-center justify-between gap-2 border px-3 py-2 text-xs ${tableBorder}`} key={`${targetItem.target}-${backupType.type}`}>
-                      <span className={`font-semibold ${t_textHeading}`}>{backupType.title}</span>
-                      <div className="flex gap-2">
-                        <button type="button" className={glassButton} disabled={busy} onClick={() => mutation.mutate({ action: "remote-pull", target: targetItem.target, type: backupType.type })}>
-                          <CloudDownload size={14} />
-                          Pull
-                        </button>
-                        <button type="button" className={glassButton} disabled={busy} onClick={() => requestRestore({ type: backupType.type, target: targetItem.target, remote: true })}>
-                          Restore
-                        </button>
+                {targetItem.dumpOnly ? (
+                  <div className={`border p-3 text-xs ${tableBorder}`}>
+                    <div className={`font-semibold ${t_textHeading}`}>Dump-only target</div>
+                    <p className={`mt-1 ${t_textMuted}`}>Telegram public Bot API is limited to 50 MB uploads. Use rclone/GDrive or Cloudflare R2 for restore.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {BACKUP_TYPES.map((backupType) => (
+                      <div className={`flex flex-wrap items-center justify-between gap-2 border px-3 py-2 text-xs ${tableBorder}`} key={`${targetItem.target}-${backupType.type}`}>
+                        <span className={`font-semibold ${t_textHeading}`}>{backupType.title}</span>
+                        <div className="flex gap-2">
+                          <button type="button" className={glassButton} disabled={busy} onClick={() => mutation.mutate({ action: "remote-pull", target: targetItem.target, type: backupType.type })}>
+                            <CloudDownload size={14} />
+                            Pull
+                          </button>
+                          <button type="button" className={glassButton} disabled={busy} onClick={() => requestRestore({ type: backupType.type, target: targetItem.target, remote: true })}>
+                            Restore
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

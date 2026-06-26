@@ -37,7 +37,6 @@ BACKUP_VERSION = 1
 DEFAULT_BACKUP_SIZE_CAP_BYTES = 2 * 1024 * 1024 * 1024
 REMOTE_BACKUP_SIZE_PRUNE_RATIO = 0.9
 TELEGRAM_PUBLIC_SEND_LIMIT_BYTES = 50 * 1024 * 1024
-TELEGRAM_PUBLIC_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 AEAD_BACKUP_MAGIC = b"EAZYFILL-UPBAK-AESGCM-V1\n"
 SYSTEM_FILE_ROOTS = [
     "data/models",
@@ -1845,70 +1844,20 @@ class BackupService:
             return {"success": False, "target": "telegram", "category": category, "error": error}
 
     def telegram_pull_latest(self, category: str) -> dict:
-        category = str(category or "").strip().lower()
-        if category not in ADMIN_BACKUP_CATEGORIES:
-            return {"success": False, "error": "category must be full, system, or users"}
-        config = self._telegram_config()
-        if not config["bot_token"]:
-            return {"success": False, "target": "telegram", "error": "Telegram bot token is required"}
-        file_id = self._setting(f"backup.telegram.latest.{category}.file_id", "").strip()
-        filename = self._setting(f"backup.telegram.latest.{category}.file_name", self._latest_backup_filename(category)).strip()
-        if not file_id:
-            return {"success": False, "target": "telegram", "category": category, "error": "No Telegram file_id is stored for this backup category"}
-        try:
-            file_response = httpx.get(
-                f"{self._telegram_api_base()}/bot{config['bot_token']}/getFile",
-                params={"file_id": file_id},
-                timeout=30,
-            )
-            file_payload = file_response.json() if file_response.content else {}
-            if file_response.status_code >= 400 or not file_payload.get("ok"):
-                error = str(file_payload.get("description") or file_response.text or "Telegram getFile failed")[:1000]
-                self._set_setting("backup.telegram.last_error", error)
-                return {"success": False, "target": "telegram", "category": category, "error": error}
-            file_path = file_payload.get("result", {}).get("file_path", "")
-            if not file_path:
-                return {"success": False, "target": "telegram", "category": category, "error": "Telegram did not return a file path"}
-            file_size = int(file_payload.get("result", {}).get("file_size") or 0)
-            if self._telegram_uses_public_api() and file_size > TELEGRAM_PUBLIC_DOWNLOAD_LIMIT_BYTES:
-                return {
-                    "success": False,
-                    "target": "telegram",
-                    "category": category,
-                    "error": "Telegram public Bot API download limit is 20 MB; use rclone/R2 for restore or configure a local Bot API server",
-                }
-            download = httpx.get(
-                f"{self._telegram_file_base()}/bot{config['bot_token']}/{file_path}",
-                timeout=300,
-            )
-            if download.status_code >= 400:
-                error = (download.text or "Telegram download failed")[:1000]
-                self._set_setting("backup.telegram.last_error", error)
-                return {"success": False, "target": "telegram", "category": category, "error": error}
-            local_dir = self._backup_category_dir(category)
-            local_dir.mkdir(parents=True, exist_ok=True)
-            destination = local_dir / Path(filename).name
-            destination.write_bytes(download.content)
-            self._set_setting("backup.telegram.last_error", "")
-            return {
-                "success": True,
-                "target": "telegram",
-                "category": category,
-                "path": str(destination),
-                "filename": destination.name,
-                "size": destination.stat().st_size,
-            }
-        except Exception as exc:
-            error = str(exc)
-            self._set_setting("backup.telegram.last_error", error)
-            return {"success": False, "target": "telegram", "category": category, "error": error}
+        return {
+            "success": False,
+            "target": "telegram",
+            "category": str(category or "").strip().lower(),
+            "error": "Telegram is dump-only for EazyFill backups. Restore from rclone/GDrive or Cloudflare R2.",
+        }
 
     def telegram_restore_latest(self, category: str, *, confirm: str = "") -> dict:
-        pulled = self.telegram_pull_latest(category)
-        if not pulled.get("success"):
-            return pulled
-        restored = self._restore_category_backup(category, pulled["path"], confirm=confirm)
-        return {"success": bool(restored.get("success")), "pulled": pulled, "restored": restored}
+        return {
+            "success": False,
+            "target": "telegram",
+            "category": str(category or "").strip().lower(),
+            "error": "Telegram restore is disabled. Restore from rclone/GDrive or Cloudflare R2.",
+        }
 
     def _restore_category_backup(self, category: str, backup_path: str | Path, *, confirm: str = "") -> dict:
         category = str(category or "").strip().lower()
@@ -1979,9 +1928,6 @@ class BackupService:
 
     def _telegram_api_base(self) -> str:
         return os.getenv("BACKUP_TELEGRAM_API_BASE", "https://api.telegram.org").strip().rstrip("/")
-
-    def _telegram_file_base(self) -> str:
-        return os.getenv("BACKUP_TELEGRAM_FILE_BASE", f"{self._telegram_api_base()}/file").strip().rstrip("/")
 
     def _telegram_uses_public_api(self) -> bool:
         return self._telegram_api_base() == "https://api.telegram.org"

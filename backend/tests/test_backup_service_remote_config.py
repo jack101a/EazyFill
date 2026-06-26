@@ -312,6 +312,19 @@ def test_full_backup_list_reads_root_packages_and_rclone_uploads_latest_alias(tm
     assert copy_commands[1][4:] == [str(full), "gdrive:eazyfill/prod/latest_full.upbak", "--log-level", "ERROR"]
 
 
+def test_telegram_restore_is_dump_only(tmp_path, monkeypatch):
+    service, _store, _config_path = _service(tmp_path, monkeypatch)
+
+    pull = service.telegram_pull_latest("system")
+    restore = service.telegram_restore_latest("system")
+
+    assert pull["success"] is False
+    assert pull["target"] == "telegram"
+    assert "dump-only" in pull["error"]
+    assert restore["success"] is False
+    assert "disabled" in restore["error"]
+
+
 def test_create_postgres_backup_uses_pg_dump_and_verifies_dump(tmp_path, monkeypatch):
     service, _store, _config_path = _postgres_service(tmp_path, monkeypatch)
     commands = []
