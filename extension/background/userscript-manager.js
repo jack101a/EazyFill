@@ -241,11 +241,12 @@ async function loadBootstrapCapabilities(scripts) {
 async function getRegisteredBootstrapCapability(scriptId) {
   const cached = registeredScriptCapabilities.get(scriptId);
   if (cached) return cached;
-  if (!chrome.storage.session?.get || !chrome.userScripts?.getScripts) return "";
+  const api = userScriptsApi();
+  if (!chrome.storage.session?.get || !api?.getScripts) return "";
 
   const [sessionData, registrations] = await Promise.all([
     chrome.storage.session.get([CAPABILITY_STORAGE_KEY]),
-    chrome.userScripts.getScripts({ ids: [toRegisteredId(scriptId)] }).catch(() => [])
+    api.getScripts({ ids: [toRegisteredId(scriptId)] }).catch(() => [])
   ]);
   const stored = sessionData[CAPABILITY_STORAGE_KEY];
   const capability = isPlainObject(stored) ? stored[scriptId] : "";
@@ -255,16 +256,54 @@ async function getRegisteredBootstrapCapability(scriptId) {
   return capability;
 }
 
+function isFirefoxRuntime() {
+  return /Firefox\//i.test(navigator.userAgent || "");
+}
+
+function userScriptsApi() {
+  return globalThis.chrome?.userScripts || globalThis.browser?.userScripts || null;
+}
+
+async function firefoxHasUserScriptsPermission() {
+  if (!isFirefoxRuntime()) return false;
+  try {
+    return !!(await chrome.permissions?.contains?.({ permissions: ["userScripts"] }));
+  } catch (_) {
+    return !!userScriptsApi()?.register;
+  }
+}
+
 function userscriptSetupInfo() {
+  const api = userScriptsApi();
+  const firefox = isFirefoxRuntime();
   const version = Number(navigator.userAgent.match(/(?:Chrome|Chromium)\/([0-9]+)/)?.[1] || 0);
   const usesPerExtensionToggle = version >= 138;
   const detailsUrl = `chrome://extensions/?id=${chrome.runtime.id}`;
+  if (firefox) {
+    return {
+      available: !!api?.register,
+      registerAvailable: !!api?.register,
+      unregisterAvailable: !!api?.unregister,
+      getScriptsAvailable: !!api?.getScripts,
+      setupRequired: !api?.register,
+      chromeVersion: null,
+      firefox: true,
+      setupMode: "firefox_user_scripts_permission",
+      detailsUrl: "about:addons",
+      instructions: [
+        "Click Grant Userscript Permission.",
+        "Approve the Firefox permission prompt.",
+        "Reload EazyFill if the status does not update."
+      ],
+      helpUrl: "about:addons"
+    };
+  }
   return {
-    available: !!chrome.userScripts?.register,
-    registerAvailable: !!chrome.userScripts?.register,
-    unregisterAvailable: !!chrome.userScripts?.unregister,
-    getScriptsAvailable: !!chrome.userScripts?.getScripts,
-    setupRequired: !chrome.userScripts?.register,
+    available: !!api?.register,
+    registerAvailable: !!api?.register,
+    unregisterAvailable: !!api?.unregister,
+    getScriptsAvailable: !!api?.getScripts,
+    setupRequired: !api?.register,
     chromeVersion: version || null,
     setupMode: usesPerExtensionToggle ? "allow_user_scripts" : "developer_mode",
     detailsUrl,
@@ -285,12 +324,13 @@ function userscriptSetupInfo() {
 
 export async function getUserscriptRuntimeStatus() {
   const status = userscriptSetupInfo();
+  const api = userScriptsApi();
   let registeredCount = 0;
   let available = false;
   let runtimeError = "";
   if (status.getScriptsAvailable) {
     try {
-      const scripts = await chrome.userScripts.getScripts();
+      const scripts = await api.getScripts();
       available = true;
       registeredCount = (scripts || []).filter((script) => String(script.id || "").startsWith(REGISTERED_PREFIX)).length;
     } catch (error) {
@@ -303,6 +343,7 @@ export async function getUserscriptRuntimeStatus() {
     available,
     setupRequired: !available,
     error: available ? "" : runtimeError || "chrome.userScripts API unavailable",
+    permissionGranted: status.firefox ? await firefoxHasUserScriptsPermission() : undefined,
     registeredCount
   };
 }
@@ -590,8 +631,9 @@ ${script.rawCode || ""}
 
 export async function registerStoredUserscripts() {
   const status = await getUserscriptRuntimeStatus();
+  const api = userScriptsApi();
   if (!status.available) {
-    return { ok: false, error: "chrome.userScripts API unavailable", ...status };
+    return { ok: false, error: "Userscript API is unavailable", ...status };
   }
 
   const [data, userscriptsEnabled] = await Promise.all([
@@ -606,12 +648,12 @@ export async function registerStoredUserscripts() {
     : [];
   const enabledScripts = applyScriptPlanLimit(candidateScripts, data.fp_auth || {});
 
-  if (chrome.userScripts.getScripts && chrome.userScripts.unregister) {
-    const registered = await chrome.userScripts.getScripts();
+  if (api?.getScripts && api?.unregister) {
+    const registered = await api.getScripts();
     const ids = (registered || [])
       .map((script) => script.id)
       .filter((id) => String(id || "").startsWith(REGISTERED_PREFIX));
-    if (ids.length) await chrome.userScripts.unregister({ ids });
+    if (ids.length) await api.unregister({ ids });
   }
 
   registeredScriptCapabilities.clear();
@@ -623,8 +665,8 @@ export async function registerStoredUserscripts() {
     return { ok: true, count: 0, disabled: true, ...await getUserscriptRuntimeStatus() };
   }
 
-  if (chrome.userScripts.configureWorld) {
-    await chrome.userScripts.configureWorld({ messaging: true });
+  if (api?.configureWorld) {
+    await api.configureWorld({ messaging: true });
   }
 
   const capabilities = await loadBootstrapCapabilities(enabledScripts);
@@ -644,7 +686,7 @@ export async function registerStoredUserscripts() {
   });
 
   if (registrations.length) {
-    await chrome.userScripts.register(registrations);
+    await api.register(registrations);
     for (const script of enabledScripts) {
       registeredScriptCapabilities.set(String(script.id), capabilities[String(script.id)]);
     }

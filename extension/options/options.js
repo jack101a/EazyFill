@@ -332,12 +332,16 @@ function userscriptSetupMode(status = state.userscriptStatus || {}) {
 
 function userscriptSetupTitle(status = state.userscriptStatus || {}) {
   if (status.authRequired) return "Sign in to run userscripts";
+  if (userscriptSetupMode(status) === "firefox_user_scripts_permission") return "Userscript permission is off";
   if (userscriptSetupMode(status) === "allow_user_scripts") return "Allow User Scripts is off";
   return "Developer mode is required";
 }
 
 function userscriptSetupMessage(status = state.userscriptStatus || {}) {
   if (status.authRequired) return "Saved scripts stay local until your EazyFill account is connected.";
+  if (userscriptSetupMode(status) === "firefox_user_scripts_permission") {
+    return "Firefox requires approval before EazyFill can register userscripts.";
+  }
   if (userscriptSetupMode(status) === "allow_user_scripts") {
     return "Chrome requires this extension-level toggle before EazyFill can register userscripts.";
   }
@@ -351,6 +355,17 @@ function userscriptSetupUrl(status = state.userscriptStatus || {}) {
 }
 
 async function openUserscriptSetupPage(status = state.userscriptStatus || {}) {
+  if (userscriptSetupMode(status) === "firefox_user_scripts_permission") {
+    const granted = await chrome.permissions?.request?.({ permissions: ["userScripts"] }).catch(() => false);
+    await refreshUserscriptStatus();
+    if (!granted && state.userscriptStatus?.setupRequired) {
+      toast("Firefox userscript permission was not granted.", "warning");
+      return;
+    }
+    await registerUserscripts({ surfaceSetupError: false });
+    toast("Userscript permission enabled", "success");
+    return;
+  }
   const url = userscriptSetupUrl(status);
   if (!url) return;
   try {
@@ -362,11 +377,11 @@ async function openUserscriptSetupPage(status = state.userscriptStatus || {}) {
         else resolve();
       });
     });
-    toast("Opened Chrome extension settings", "info");
+    toast("Opened extension settings", "info");
   } catch (error) {
     try {
       await navigator.clipboard?.writeText(url);
-      toast("Chrome blocked opening the settings page, so the URL was copied.", "warning");
+      toast("The browser blocked opening the settings page, so the URL was copied.", "warning");
     } catch (_) {
       toast(`Open ${url}`, "warning");
     }
@@ -1809,9 +1824,12 @@ function renderUserscriptRuntimeAlert(target, { compact = false, overview = fals
   main.append(steps);
 
   const actions = node("div", "runtime-alert-actions");
-  const openLabel = userscriptSetupMode(status) === "allow_user_scripts"
-    ? "Open Extension Details"
-    : "Open Chrome Extensions";
+  const mode = userscriptSetupMode(status);
+  const openLabel = mode === "firefox_user_scripts_permission"
+    ? "Grant Userscript Permission"
+    : mode === "allow_user_scripts"
+      ? "Open Extension Details"
+      : "Open Chrome Extensions";
   const openButton = actionButton(openLabel, "icon-text-btn runtime-alert-button");
   openButton.addEventListener("click", () => handle(() => openUserscriptSetupPage(status)));
   actions.append(openButton);

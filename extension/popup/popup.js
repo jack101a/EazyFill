@@ -424,6 +424,13 @@ function popupUserscriptRuntimeNeedsSetup(status = state.userscriptStatus || {})
 }
 
 function popupUserscriptSetupCopy(status = state.userscriptStatus || {}) {
+  if (popupUserscriptSetupMode(status) === "firefox_user_scripts_permission") {
+    return {
+      title: "Userscript permission is off",
+      body: "Grant Firefox permission so EazyFill can run your enabled userscripts.",
+      button: "Grant Permission"
+    };
+  }
   if (popupUserscriptSetupMode(status) === "allow_user_scripts") {
     return {
       title: "Allow User Scripts is off",
@@ -439,6 +446,19 @@ function popupUserscriptSetupCopy(status = state.userscriptStatus || {}) {
 }
 
 async function openUserscriptSetupPage(status = state.userscriptStatus || {}) {
+  if (popupUserscriptSetupMode(status) === "firefox_user_scripts_permission") {
+    const granted = await chrome.permissions?.request?.({ permissions: ["userScripts"] }).catch(() => false);
+    await refreshStatus();
+    if (!granted && state.userscriptStatus?.setupRequired) {
+      setAlert("Firefox userscript permission was not granted.", "warning");
+      await refreshStatus();
+      return;
+    }
+    await sendMessage({ type: "USERSCRIPTS_REGISTER" }).catch(() => null);
+    setAlert("Userscript permission enabled.", "success");
+    await refreshStatus();
+    return;
+  }
   const url = popupUserscriptSetupUrl(status);
   if (!url) return;
   try {
@@ -453,7 +473,7 @@ async function openUserscriptSetupPage(status = state.userscriptStatus || {}) {
   } catch (_) {
     try {
       await navigator.clipboard?.writeText(url);
-      setAlert("Chrome blocked opening the settings page, so the URL was copied.", "warning");
+      setAlert("The browser blocked opening the settings page, so the URL was copied.", "warning");
     } catch {
       setAlert(`Open ${url}`, "warning");
     }
