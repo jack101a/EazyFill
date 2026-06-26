@@ -1,23 +1,18 @@
 {
   "manifest_version": 3,
   "name": "EazyFill",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minimum_chrome_version": "120",
   "default_locale": "en",
   "description": "CAPTCHA solving, form autofill, and userscript tools for browser productivity",
   "permissions": [
-    "activeTab",
     "storage",
     "unlimitedStorage",
-    "scripting",
     "alarms",
     "notifications",
     "userScripts",
     "downloads",
     "webNavigation"
-  ],
-  "optional_permissions": [
-    "clipboardWrite"
   ],
   "host_permissions": [
     "https://*/*",

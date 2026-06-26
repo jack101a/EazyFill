@@ -4,13 +4,9 @@ Use this draft when completing browser store permission and privacy fields. Rech
 
 ## Permissions
 
-`activeTab`: Supports user-invoked actions on the current tab, including selector picking, CAPTCHA assistance, recording, and form-filling playback.
-
 `storage`: Stores extension settings, the protected account/session record, rules, scripts, profiles, CAPTCHA selectors, credit state, and sync metadata in browser extension storage.
 
 `unlimitedStorage`: Allows larger user-created script, profile, rule, and backup collections to remain local without relying on server storage.
-
-`scripting`: Injects selector, recorder, and form-filling helpers into pages where the user invokes or configures those features.
 
 `alarms`: Schedules account, credit, userscript registration, and sync-related refresh work from the Manifest V3 service worker.
 
@@ -22,13 +18,15 @@ Use this draft when completing browser store permission and privacy fields. Rech
 
 `webNavigation`: Detects navigation to `.user.js` install URLs so EazyFill can open its own userscript import flow for the user.
 
-## Optional Permissions
-
-`clipboardWrite`: Requested for user-triggered script helpers such as `GM_setClipboard`.
-
 ## Host Permissions
 
 `http://*/*` and `https://*/*`: EazyFill supports user-defined match patterns, form rules, and CAPTCHA selectors across sites selected by the user. Content scripts load on matching web pages so the extension can identify configured rules and respond to user commands. EazyFill does not promise unattended automation, and a site can change or prevent an assisted action.
+
+## Permissions Not Requested
+
+EazyFill does not request `scripting`. Selector, recorder, CAPTCHA, autofill, and userscript helpers are declared in `content_scripts` and loaded only on matching HTTP/HTTPS pages.
+
+EazyFill does not request `activeTab`. Current-tab actions use the already-declared HTTP/HTTPS host permissions and content-script messaging.
 
 ## Chrome Web Store Data Disclosure Draft
 

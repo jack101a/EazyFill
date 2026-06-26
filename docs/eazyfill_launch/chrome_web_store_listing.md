@@ -68,6 +68,7 @@ Required Chrome Web Store image tasks:
 - Manifest V3 service worker architecture is used.
 - User-managed scripts are registered through the browser User Scripts API.
 - Broad host permissions support rules, scripts, selectors, and assistance on sites chosen by the user.
-- `downloads` supports user-triggered backup exports. `clipboardWrite` is optional and used only for user-triggered script helper actions.
+- `downloads` supports user-triggered backup exports and userscript download helper actions.
+- The extension does not request `scripting`; page helpers are declared in `content_scripts`.
 - Chrome users must enable the browser's `Allow User Scripts` setting before managed scripts can run.
 - Firefox packaging exists, but Firefox installation and feature behavior remain manual QA blockers.

@@ -89,7 +89,7 @@ Do not submit another payment immediately. Record the EazyFill payment/order ide
 
 ### Is Firefox fully supported?
 
-An EazyFill Firefox `1.0.0` package exists, but Firefox installation and end-to-end feature behavior remain manual QA blockers. Userscript behavior and browser API differences must be tested and documented before Firefox distribution.
+An EazyFill Firefox `1.0.1` package can be generated from the Firefox extension folder, but Firefox installation and end-to-end feature behavior remain manual QA blockers. Userscript behavior and browser API differences must be tested and documented before Firefox distribution.
 
 ### What still requires manual launch verification?
 

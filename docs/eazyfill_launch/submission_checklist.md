@@ -2,8 +2,8 @@
 
 ## Verified Artifact Snapshot
 
-- [x] Chrome manifest name/version: `EazyFill` `1.0.0`.
-- [x] Firefox manifest name/version: `EazyFill` `1.0.0`.
+- [x] Chrome manifest name/version: `EazyFill` `1.0.1`.
+- [x] Firefox manifest name/version: `EazyFill` `1.0.1`.
 - [ ] Chrome artifact present: refresh before submission.
 - [ ] Firefox artifact present: refresh separately before Firefox distribution.
 - [ ] Package audit passes the current ZIP file.
@@ -46,7 +46,7 @@ Previous artifact sizes were from an older workspace snapshot and must not be re
 
 ## Firefox Manual QA Gate
 
-- [ ] Install `extension/dist/eazyfill-firefox-v1.0.0.zip` in the target Firefox test environment.
+- [ ] Install the refreshed Firefox `1.0.1` package in the target Firefox test environment.
 - [ ] Verify permissions, popup, options, email sign-in, selectors, CAPTCHA assistance, form filling, imports/exports, sync, and billing status.
 - [ ] Document userscript compatibility or feature gaps in Firefox.
 - [ ] Confirm the Firefox data-collection declaration matches observed behavior.
