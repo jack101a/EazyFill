@@ -192,7 +192,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   scheduleAutoSync("local_change");
 });
 
-chrome.commands.onCommand.addListener(async (command) => {
+chrome.commands?.onCommand?.addListener(async (command) => {
   try {
     if (!await isExtensionEnabled()) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

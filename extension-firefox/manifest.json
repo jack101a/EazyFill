@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "EazyFill",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "default_locale": "en",
-  "description": "CAPTCHA solving, form autofill, and userscript tools for browser productivity",
+  "description": "Form autofill, userscript controls, and user-managed CAPTCHA field assistance",
+  "homepage_url": "https://eazyfill.tata-ocs.duckdns.org",
   "permissions": [
     "storage",
     "unlimitedStorage",
@@ -105,9 +106,23 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* http://*:* https://*:*"
   },
+  "commands": {
+    "solve-captcha": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Assist CAPTCHA fields on current page"
+    },
+    "fill-autofill": {
+      "suggested_key": { "default": "Alt+Shift+F" },
+      "description": "Fill autofill on current page"
+    },
+    "start-recording": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Start recording"
+    }
+  },
   "browser_specific_settings": {
     "gecko": {
-      "id": "eazyfill@sa-helper.local",
+      "id": "eazyfill@002529.xyz",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": [
