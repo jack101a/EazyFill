@@ -193,6 +193,62 @@ main {
   margin-bottom: 14px;
 }
 
+.install-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, #ffffff 0%, #f7f3ff 100%);
+  border: 1px solid var(--soft-strong);
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(48, 39, 90, 0.06);
+}
+
+.install-banner h2 {
+  margin-bottom: 6px;
+}
+
+.install-banner p {
+  margin-bottom: 0;
+}
+
+.store-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.store-link {
+  min-width: 150px;
+  padding: 10px 12px;
+  color: var(--text);
+  text-decoration: none;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.store-link:hover {
+  border-color: var(--brand);
+}
+
+.store-link span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.store-link strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.92rem;
+}
+
 .page-heading {
   padding: 24px 0 14px;
 }
@@ -345,5 +401,17 @@ th {
 
   .hero-panel {
     grid-template-columns: 1fr;
+  }
+
+  .install-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .store-actions {
+    justify-content: stretch;
+  }
+
+  .store-link {
+    flex: 1 1 100%;
   }
 }

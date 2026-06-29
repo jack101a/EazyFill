@@ -46,3 +46,14 @@ def test_pricing_page_loads_dynamic_plan_catalog():
     assert "/public-assets/pricing.js" in response.text
     assert "INR 499.00" not in response.text
     assert "500 CAPTCHA credits per cycle" not in response.text
+
+
+def test_home_page_links_to_browser_stores():
+    app = FastAPI()
+    app.include_router(router)
+
+    response = TestClient(app).get("/")
+
+    assert response.status_code == 200
+    assert "chromewebstore.google.com/detail/eazyfill/nafpeknhhfebaieljomikajfpkfgmmma" in response.text
+    assert "addons.mozilla.org/en-US/firefox/addon/eazyfill/" in response.text
