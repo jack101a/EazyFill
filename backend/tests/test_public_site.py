@@ -57,3 +57,4 @@ def test_home_page_links_to_browser_stores():
     assert response.status_code == 200
     assert "chromewebstore.google.com/detail/eazyfill/nafpeknhhfebaieljomikajfpkfgmmma" in response.text
     assert "addons.mozilla.org/en-US/firefox/addon/eazyfill/" in response.text
+    assert "/public-assets/assets/marquee-promo-1400x560.png" in response.text

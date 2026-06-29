@@ -195,8 +195,8 @@ main {
 
 .install-banner {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 20px;
   align-items: center;
   padding: 18px;
   margin-bottom: 14px;
@@ -214,28 +214,42 @@ main {
   margin-bottom: 0;
 }
 
+.install-copy {
+  min-width: 0;
+}
+
 .store-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .store-link {
-  min-width: 150px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 184px;
   padding: 10px 12px;
   color: var(--text);
   text-decoration: none;
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(28, 33, 54, 0.05);
 }
 
 .store-link:hover {
   border-color: var(--brand);
 }
 
-.store-link span {
+.store-logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.store-link small {
   display: block;
   color: var(--muted);
   font-size: 0.72rem;
@@ -245,8 +259,24 @@ main {
 
 .store-link strong {
   display: block;
-  margin-top: 2px;
-  font-size: 0.92rem;
+  margin-top: 1px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.install-media {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(139, 77, 246, 0.2);
+  border-radius: 8px;
+  background: #130f24;
+  box-shadow: 0 16px 34px rgba(28, 33, 54, 0.12);
+}
+
+.install-media img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .page-heading {
