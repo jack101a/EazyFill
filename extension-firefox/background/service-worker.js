@@ -25,7 +25,10 @@ const AUTO_SYNC_KEYS = new Set([
 ]);
 let autoSyncTimer = null;
 let autoSyncRunning = false;
-const LEGACY_API_BASE_URL = "https://eazyfill.app";
+const LEGACY_API_BASE_URLS = new Set([
+  "https://eazyfill.app",
+  "https://eazyfill.tata-ocs.duckdns.org"
+]);
 const DEFAULT_CAPTCHA_BEHAVIOR = {
   captchaFillDelayMs: 200,
   captchaHumanTyping: true,
@@ -124,7 +127,7 @@ async function ensureDefaults() {
       shouldUpdateSettings = true;
     }
   }
-  if (!storedApiBase || storedApiBase === LEGACY_API_BASE_URL) {
+  if (!storedApiBase || LEGACY_API_BASE_URLS.has(storedApiBase)) {
     nextSettings.apiBaseUrl = DEFAULT_API_BASE_URL;
     shouldUpdateSettings = true;
   }
@@ -139,7 +142,7 @@ async function ensureDefaults() {
   const latest = await chrome.storage.local.get(keys);
   const safeUpdates = {};
   for (const key of keys) {
-    if (latest[key] === undefined) safeUpdates[key] = updates[key];
+    if (key === "fp_settings" || latest[key] === undefined) safeUpdates[key] = updates[key];
   }
   if (Object.keys(safeUpdates).length) await setExtensionStorage(safeUpdates);
 }

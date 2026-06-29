@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE_URL = "https://eazyfill.tata-ocs.duckdns.org";
+export const DEFAULT_API_BASE_URL = "https://eazyfill.002529.xyz";
 
 const SUPPORTED_AUTH_EMAIL_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.com", "msn.com",
