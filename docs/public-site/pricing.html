@@ -31,45 +31,11 @@
       </div>
     </section>
 
-    <section class="grid" aria-label="Plan cards">
-      <article class="card plan-card">
-        <span class="tag">Start</span>
-        <h2>Free</h2>
-        <p class="price">No cost</p>
-        <p class="billing-cycle">Starter access</p>
-        <p class="muted">For light local use and evaluation.</p>
-        <ul class="feature-list">
-          <li>100 CAPTCHA credits per cycle</li>
-          <li>1 device</li>
-          <li>Autofill support</li>
-          <li>Userscripts support</li>
-        </ul>
-      </article>
-      <article class="card plan-card featured">
-        <span class="tag">Core</span>
-        <h2>Basic</h2>
-        <p class="price">INR 1.00</p>
-        <p class="billing-cycle">30 days</p>
-        <p class="muted">Core EazyFill automation, sync, and import/export.</p>
-        <ul class="feature-list">
-          <li>500 CAPTCHA credits per cycle</li>
-          <li>1 device</li>
-          <li>Autofill support</li>
-          <li>Userscripts support</li>
-        </ul>
-      </article>
-      <article class="card plan-card">
-        <span class="tag">Scale</span>
-        <h2>Pro</h2>
-        <p class="price">INR 499.00</p>
-        <p class="billing-cycle">30 days</p>
-        <p class="muted">Higher credits, more devices, and priority service access.</p>
-        <ul class="feature-list">
-          <li>2,500 CAPTCHA credits per cycle</li>
-          <li>5 devices</li>
-          <li>Autofill support</li>
-          <li>Userscripts support</li>
-        </ul>
+    <section class="grid plan-grid" id="public-plans-grid" aria-label="Plan cards" aria-live="polite">
+      <article class="card plan-card plan-card-loading">
+        <span class="tag">Loading</span>
+        <h2>Fetching plans</h2>
+        <p class="muted">Loading the latest checkout plans from the EazyFill server.</p>
       </article>
     </section>
 
@@ -86,5 +52,6 @@
   </main>
 
   <footer class="site-footer"><div class="wrap">EazyFill pricing and billing information.</div></footer>
+  <script src="/public-assets/pricing.js" defer></script>
 </body>
 </html>

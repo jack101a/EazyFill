@@ -34,3 +34,15 @@ def test_public_site_unknown_page_404s():
 
     response = TestClient(app).get("/not-a-real-page")
     assert response.status_code == 404
+
+
+def test_pricing_page_loads_dynamic_plan_catalog():
+    app = FastAPI()
+    app.include_router(router)
+
+    response = TestClient(app).get("/pricing")
+
+    assert response.status_code == 200
+    assert "/public-assets/pricing.js" in response.text
+    assert "INR 499.00" not in response.text
+    assert "500 CAPTCHA credits per cycle" not in response.text
