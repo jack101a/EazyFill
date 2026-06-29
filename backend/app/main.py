@@ -9,12 +9,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path as _Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.admin import router as admin_router
+from app.api.public_site import router as public_site_router
 from app.api.routes import router as v1_router
 from app.api.v2_routes import router as v2_router
 from app.api.webhooks import router as webhooks_router
@@ -114,6 +115,7 @@ app.include_router(v1_router)
 app.include_router(v2_router)
 app.include_router(admin_router)
 app.include_router(webhooks_router)
+app.include_router(public_site_router)
 
 # Static assets
 _static_dir = _Path(__file__).resolve().parent / "static"
@@ -130,13 +132,9 @@ if not _admin_brand_dir.exists():
 if _admin_brand_dir.exists():
     app.mount("/brand", StaticFiles(directory=str(_admin_brand_dir)), name="admin_brand")
 
-_privacy_policy_path = _Path(__file__).resolve().parents[2] / "docs" / "privacy-policy.html"
-
-
-@app.get("/privacy-policy.html", include_in_schema=False)
-@app.get("/privacy", include_in_schema=False)
-async def privacy_policy() -> FileResponse:
-    return FileResponse(str(_privacy_policy_path), media_type="text/html")
+_public_assets_dir = _Path(__file__).resolve().parents[2] / "docs" / "public-site"
+if _public_assets_dir.exists():
+    app.mount("/public-assets", StaticFiles(directory=str(_public_assets_dir)), name="public_assets")
 
 
 @app.get("/health")

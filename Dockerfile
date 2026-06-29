@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && rm -f /tmp/requirements.txt
 
 COPY backend/ /app/backend/
-COPY docs/privacy-policy.html /app/docs/privacy-policy.html
+COPY docs/public-site/ /app/docs/public-site/
 COPY backend/config/ /opt/eazyfill-seed/backend/config/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist
