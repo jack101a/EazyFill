@@ -2843,17 +2843,20 @@ function renderBilling() {
 
     const priceBox = document.createElement("div");
     priceBox.className = "plan-price-box";
+    const rawAmount = Number(plan.price?.amount || plan.price_amount || 0);
     const price = priceLabel(plan.price || { amount: plan.price_amount || 0, currency: plan.currency || "INR" });
     const [currency, ...amountParts] = price.split(" ");
     const currencyNode = document.createElement("span");
     currencyNode.className = "plan-price-currency";
-    currencyNode.textContent = amountParts.length ? currency : "";
+    currencyNode.textContent = rawAmount > 0 && amountParts.length ? currency : "";
     const amountNode = document.createElement("span");
     amountNode.className = "plan-price";
-    amountNode.textContent = amountParts.length ? amountParts.join(" ") : price;
+    amountNode.textContent = rawAmount > 0
+      ? (amountParts.length ? amountParts.join(" ") : price)
+      : "No cost";
     const periodNode = document.createElement("span");
     periodNode.className = "plan-price-period";
-    periodNode.textContent = Number(plan.price?.amount || plan.price_amount || 0) > 0 ? `/${plan.duration_days || 30} days` : "";
+    periodNode.textContent = rawAmount > 0 ? ` / ${plan.duration_days || 30} days` : "";
     priceBox.append(currencyNode, amountNode, periodNode);
     card.append(priceBox);
 
@@ -2875,7 +2878,7 @@ function renderBilling() {
     button.className = authenticated ? "primary-btn choose-plan-btn" : "secondary-btn choose-plan-btn";
     button.disabled = isCurrent;
     button.textContent = isCurrent
-      ? "Current Plan"
+      ? "Current"
       : authenticated
         ? "Pay"
         : "Sign In First";

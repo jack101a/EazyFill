@@ -38,6 +38,18 @@ def _create_admin_login_app(settings):
     return app
 
 
+def _create_full_admin_app(settings):
+    """Create app with the production admin router mounted."""
+    from app.api.admin import router as admin_router
+
+    app = FastAPI()
+    app.state.container = MagicMock()
+    app.state.container.settings = settings
+    app.state.user_key_service = MagicMock()
+    app.include_router(admin_router)
+    return app
+
+
 @pytest.fixture
 def admin_settings():
     s = MagicMock()
@@ -123,3 +135,19 @@ class TestAdminGuard:
 
         assert response.status_code == 200
         assert "EazyFill Admin" in response.text
+
+    def test_real_admin_router_requires_session_for_pages_and_api(self, admin_settings):
+        """Public users must not reach the admin SPA or admin JSON APIs."""
+        app = _create_full_admin_app(admin_settings)
+        client = TestClient(app)
+
+        dashboard = client.get("/admin/", follow_redirects=False)
+        nested_page = client.get("/admin/payments", follow_redirects=False)
+        api = client.get("/admin/api/bootstrap", headers={"x-admin-api": "1"}, follow_redirects=False)
+
+        assert dashboard.status_code == 303
+        assert dashboard.headers["location"] == "/admin/login"
+        assert nested_page.status_code == 303
+        assert nested_page.headers["location"] == "/admin/login"
+        assert api.status_code == 401
+        assert api.json() == {"error": "admin_auth_required"}

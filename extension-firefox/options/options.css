@@ -2419,52 +2419,35 @@ textarea {
 /* Pricing Grid Styles */
 .plan-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
 }
 
 .plan-card {
   background: var(--surface-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
+  border-radius: 8px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  transition: all 0.2s ease;
+  gap: 12px;
+  transition: border-color 0.18s ease, background 0.18s ease;
   position: relative;
   overflow: hidden;
 }
 
 .plan-card:hover {
-  transform: translateY(-4px);
   border-color: var(--accent);
-  box-shadow: 0 12px 32px rgba(0, 122, 255, 0.15);
+  background: rgba(139, 77, 246, 0.035);
 }
 
 .plan-card.premium {
-  background: linear-gradient(135deg, rgba(0, 122, 255, 0.06) 0%, rgba(88, 86, 214, 0.06) 100%);
-  border-color: rgba(0, 122, 255, 0.3);
+  border-color: rgba(139, 77, 246, 0.34);
 }
 
 .plan-card.current {
   border-color: rgba(48, 209, 88, 0.34);
   background: rgba(48, 209, 88, 0.055);
-}
-
-.plan-card.premium::after {
-  content: "Popular";
-  position: absolute;
-  top: 15px;
-  right: -30px;
-  background: linear-gradient(90deg, #ff9500, #ff2d55);
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  padding: 4px 30px;
-  transform: rotate(45deg);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .plan-card h4 {
@@ -2475,17 +2458,19 @@ textarea {
 }
 
 .plan-price-box {
-  margin: 16px 0;
+  margin: 2px 0 0;
+  min-height: 44px;
 }
 
 .plan-price {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 800;
   color: var(--text);
+  letter-spacing: 0;
 }
 
 .plan-price-currency {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
   vertical-align: super;
@@ -2501,13 +2486,13 @@ textarea {
   font-size: 13px;
   font-weight: 600;
   color: var(--accent);
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .plan-features {
   list-style: none;
   padding: 0;
-  margin: 0 0 24px 0;
+  margin: 0 0 8px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2523,9 +2508,12 @@ textarea {
 }
 
 .plan-features li::before {
-  content: "✓";
-  color: var(--success);
-  font-weight: bold;
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: 0 0 7px;
 }
 
 .plan-features li.disabled {
@@ -2535,8 +2523,7 @@ textarea {
 }
 
 .plan-features li.disabled::before {
-  content: "✗";
-  color: var(--danger);
+  background: var(--danger);
 }
 
 .plan-card .primary-btn {
