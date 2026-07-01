@@ -81,6 +81,32 @@ function usagePercent(used, limit) {
   return Math.min(100, Math.round((Number(used || 0) / cap) * 100));
 }
 
+function rowUsageText(user) {
+  const used = user.plan_usage_used ?? user.quota_used ?? user.usage_used ?? 0;
+  const limit = user.quota_limit ?? user.plan_monthly_limit ?? 0;
+  return `${formatCount(used)}/${formatCount(limit)}`;
+}
+
+function rowActivityText(user) {
+  const today = Number(user.today_credits_used || 0);
+  const sessions = Number(user.active_session_count || 0);
+  const devices = Number(user.active_device_count || 0);
+  if (today || sessions || devices || user.last_activity_at) {
+    return {
+      primary: today ? `${formatCount(today)} credits today` : `${formatCount(sessions)} sessions`,
+      secondary: `${formatCount(devices)} devices · Last ${formatDate(user.last_activity_at)}`,
+    };
+  }
+  const fallback = Number(user.key_usage_count || user.request_usage_count || 0);
+  if (fallback || user.key_last_used_at) {
+    return {
+      primary: `${formatCount(fallback)} requests`,
+      secondary: `Last ${formatDate(user.key_last_used_at)}`,
+    };
+  }
+  return null;
+}
+
 function planDuration(plans, planId) {
   const plan = plans.find((p) => String(p.id) === String(planId));
   return plan?.duration_days || 30;
@@ -117,6 +143,9 @@ export function UsersPanel({ showToast }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userDetails, setUserDetails] = useState(null);
+  const [usageUser, setUsageUser] = useState(null);
+  const [usageDetails, setUsageDetails] = useState(null);
+  const [usageLoading, setUsageLoading] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -158,6 +187,11 @@ export function UsersPanel({ showToast }) {
     setEditingUser(null);
     setUserDetails(null);
     setForm(EMPTY_FORM);
+  };
+
+  const closeUsage = () => {
+    setUsageUser(null);
+    setUsageDetails(null);
   };
 
   const openCreate = () => {
@@ -311,6 +345,20 @@ export function UsersPanel({ showToast }) {
     }
   };
 
+  const openUsage = async (user) => {
+    setUsageUser(user);
+    setUsageDetails(null);
+    setUsageLoading(true);
+    try {
+      const details = await getUser(user.id);
+      setUsageDetails(details);
+    } catch (e) {
+      showToast(errMessage(e, "Failed to load account usage"), "error");
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+
   const handleCreateRazorpayOrder = async () => {
     if (!editingUser) return;
     if (!form.plan_id) {
@@ -427,17 +475,30 @@ export function UsersPanel({ showToast }) {
               <tbody>
                 {users.map((u) => (
                   <tr key={u.id} className={`border-b ${t_borderLight} ${isDark ? "hover:bg-white/[0.02]" : "hover:bg-black/[0.02]"}`}>
-                    <td className={`p-3 font-medium ${t_textHeading}`}>{u.full_name || "--"}</td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => openUsage(u)}
+                        className={`text-left font-medium underline-offset-2 hover:underline ${t_textHeading}`}
+                        title="Open account usage"
+                      >
+                        {u.full_name || u.email || `User #${u.id}`}
+                      </button>
+                    </td>
                     <td className={`p-3 ${t_textMuted}`}>{u.email || "--"}</td>
                     <td className={`p-3 ${t_textMuted}`}>{u.mobile_number || "--"}</td>
                     <td className={`p-3 ${t_textHeading}`}>
                       {u.plan_name ? (
-                        <span>{u.plan_name}<br/><span className={`text-xs ${t_textMuted}`}>Usage {formatCount(u.plan_usage_used ?? u.key_usage_count ?? u.quota_used ?? u.usage_used)}/{formatCount(u.quota_limit ?? u.plan_monthly_limit)}</span></span>
+                        <span>
+                          {u.plan_name}
+                          {u.subscription_status && u.subscription_status !== "active" ? <span className={`text-xs ${t_textMuted}`}> ({u.subscription_status})</span> : null}
+                          <br/><span className={`text-xs ${t_textMuted}`}>Usage {rowUsageText(u)}</span>
+                        </span>
                       ) : <span className={t_textMuted}>--</span>}
                     </td>
                     <td className={`p-3 ${t_textHeading}`}>
-                      {(u.key_usage_count || u.key_last_used_at) ? (
-                        <span>{formatCount(u.key_usage_count)} requests<br/><span className={`text-xs ${t_textMuted}`}>Last {formatDate(u.key_last_used_at)}</span></span>
+                      {rowActivityText(u) ? (
+                        <span>{rowActivityText(u).primary}<br/><span className={`text-xs ${t_textMuted}`}>{rowActivityText(u).secondary}</span></span>
                       ) : <span className={t_textMuted}>No activity</span>}
                     </td>
                     <td className={`p-3 ${t_textMuted}`}>
@@ -478,6 +539,30 @@ export function UsersPanel({ showToast }) {
           <div className="flex gap-2">
             <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className={iconBtn("ghost")}><ChevronLeft size={16} /></button>
             <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className={iconBtn("ghost")}><ChevronRight size={16} /></button>
+          </div>
+        </div>
+      )}
+
+      {usageUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={closeUsage}>
+          <div className={`${glassPanel} rounded-2xl p-6 w-full max-w-4xl border ${t_borderLight} max-h-[90vh] overflow-auto`} onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className={`text-lg font-semibold ${t_textHeading}`}>Account usage</h3>
+                <p className={`text-xs ${t_textMuted}`}>{usageUser.full_name || usageUser.email || `User #${usageUser.id}`} - {usageUser.email || "No email"}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {usageLoading && <Loader2 size={18} className="animate-spin text-indigo-500" />}
+                <button type="button" onClick={closeUsage} className={`px-3 py-2 rounded-xl text-sm ${t_textMuted} border ${t_borderLight}`}>Close</button>
+              </div>
+            </div>
+            <AccountUsageContent
+              details={usageDetails}
+              fallbackUser={usageUser}
+              muted={t_textMuted}
+              heading={t_textHeading}
+              border={t_borderLight}
+            />
           </div>
         </div>
       )}
@@ -546,93 +631,6 @@ export function UsersPanel({ showToast }) {
 
             {editingUser && (
               <div className="mt-6 grid grid-cols-1 gap-4">
-                <section className={`rounded-xl border p-4 ${t_borderLight}`}>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h4 className={`text-sm font-semibold ${t_textHeading}`}>Account usage</h4>
-                      <p className={`text-xs ${t_textMuted}`}>Quota, sync storage, active sessions, and device state.</p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-xs ${STATUS_COLORS[userDetails?.status] || STATUS_COLORS.inactive}`}>
-                      {userDetails?.status || editingUser.status}
-                    </span>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <MetricCard
-                      label="Cycle usage"
-                      value={`${formatCount(userDetails?.usage?.quota_used)}/${formatCount(userDetails?.usage?.quota_limit)}`}
-                      detail={`${usagePercent(userDetails?.usage?.quota_used, userDetails?.usage?.quota_limit)}% used`}
-                      muted={t_textMuted}
-                      heading={t_textHeading}
-                      border={t_borderLight}
-                    />
-                    <MetricCard
-                      label="Today"
-                      value={formatCount(userDetails?.usage?.today?.credits_used)}
-                      detail="credits used"
-                      muted={t_textMuted}
-                      heading={t_textHeading}
-                      border={t_borderLight}
-                    />
-                    <MetricCard
-                      label="Cloud backup"
-                      value={formatBytes(userDetails?.sync_backup?.blob_size_bytes)}
-                      detail={userDetails?.sync_backup?.updated_at ? `v${userDetails.sync_backup.sync_version} · ${formatDate(userDetails.sync_backup.updated_at)}` : "No sync blob"}
-                      muted={t_textMuted}
-                      heading={t_textHeading}
-                      border={t_borderLight}
-                    />
-                    <MetricCard
-                      label="Sessions"
-                      value={formatCount((userDetails?.sessions || []).filter((item) => item.status === "active").length)}
-                      detail={`${formatCount(userDetails?.plan_limits?.max_devices || 0)} device limit`}
-                      muted={t_textMuted}
-                      heading={t_textHeading}
-                      border={t_borderLight}
-                    />
-                  </div>
-                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                    <DetailList
-                      title="Recent sessions"
-                      items={(userDetails?.sessions || []).slice(0, 5).map((item) => ({
-                        key: item.id,
-                        primary: item.device_name || item.device_id || `Session #${item.id}`,
-                        secondary: `${item.status} · ${formatDateTime(item.last_seen)}`,
-                      }))}
-                      empty="No account sessions recorded"
-                      muted={t_textMuted}
-                      heading={t_textHeading}
-                      border={t_borderLight}
-                    />
-                    <DetailList
-                      title="Devices"
-                      items={(userDetails?.all_devices || userDetails?.devices || []).slice(0, 5).map((item) => ({
-                        key: item.id,
-                        primary: item.device_name || item.device_fingerprint || `Device #${item.id}`,
-                        secondary: `${item.status} · ${formatDateTime(item.last_seen)}`,
-                      }))}
-                      empty="No device activity recorded"
-                      muted={t_textMuted}
-                      heading={t_textHeading}
-                      border={t_borderLight}
-                    />
-                  </div>
-                  <div className={`mt-4 rounded-xl border ${t_borderLight} p-3`}>
-                    <div className={`mb-2 text-xs font-semibold uppercase ${t_textMuted}`}>Recent payments</div>
-                    {(userDetails?.payments || []).length ? (
-                      <div className="grid gap-2">
-                        {(userDetails?.payments || []).slice(0, 5).map((payment) => (
-                          <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                            <span className={t_textHeading}>#{payment.id} · {payment.plan_name || `Plan ${payment.plan_id || "--"}`}</span>
-                            <span className={t_textMuted}>{payment.currency || "INR"} {(Number(payment.amount || 0) / 100).toFixed(2)} · {payment.status} · {formatDate(payment.created_at)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className={`text-xs ${t_textMuted}`}>No payments recorded</p>
-                    )}
-                  </div>
-                </section>
-
                 <section className={`rounded-xl border p-4 ${t_borderLight}`}>
                   <h4 className={`text-sm font-semibold mb-3 ${t_textHeading}`}>Subscription</h4>
                   <div className={`text-xs mb-3 ${t_textMuted}`}>
@@ -737,6 +735,105 @@ function DetailList({ title, items, empty, muted, heading, border }) {
   );
 }
 
+function AccountUsageContent({ details, fallbackUser, muted, heading, border }) {
+  const account = details || fallbackUser || {};
+  const usage = details?.usage || {};
+  const subscription = details?.display_subscription || details?.active_subscription || {};
+  const activeSessions = (details?.sessions || []).filter((item) => item.status === "active").length;
+  return (
+    <div className="grid gap-4">
+      <section className={`rounded-xl border p-4 ${border}`}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h4 className={`text-sm font-semibold ${heading}`}>Usage stats</h4>
+            <p className={`text-xs ${muted}`}>
+              {subscription.plan_name || account.plan_name || "No plan"}{subscription.status ? ` (${subscription.status})` : ""} - expires {formatDate(subscription.end_at || account.subscription_expiry)}
+            </p>
+          </div>
+          <span className={`rounded-full px-2 py-1 text-xs ${STATUS_COLORS[account.status] || STATUS_COLORS.inactive}`}>
+            {account.status || "unknown"}
+          </span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Cycle usage"
+            value={`${formatCount(usage.quota_used ?? account.quota_used)}/${formatCount(usage.quota_limit ?? account.quota_limit)}`}
+            detail={`${usagePercent(usage.quota_used ?? account.quota_used, usage.quota_limit ?? account.quota_limit)}% used`}
+            muted={muted}
+            heading={heading}
+            border={border}
+          />
+          <MetricCard
+            label="Today"
+            value={formatCount(usage.today?.credits_used ?? account.today_credits_used)}
+            detail="credits used"
+            muted={muted}
+            heading={heading}
+            border={border}
+          />
+          <MetricCard
+            label="Cloud backup"
+            value={formatBytes(details?.sync_backup?.blob_size_bytes ?? account.sync_backup_size_bytes)}
+            detail={details?.sync_backup?.updated_at || account.sync_updated_at ? `Updated ${formatDate(details?.sync_backup?.updated_at || account.sync_updated_at)}` : "No sync blob"}
+            muted={muted}
+            heading={heading}
+            border={border}
+          />
+          <MetricCard
+            label="Sessions"
+            value={formatCount(activeSessions || account.active_session_count)}
+            detail={`${formatCount(details?.plan_limits?.max_devices || 0)} device limit`}
+            muted={muted}
+            heading={heading}
+            border={border}
+          />
+        </div>
+      </section>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <DetailList
+          title="Recent sessions"
+          items={(details?.sessions || []).slice(0, 6).map((item) => ({
+            key: item.id,
+            primary: item.device_name || item.device_id || `Session #${item.id}`,
+            secondary: `${item.status} - ${formatDateTime(item.last_seen)}`,
+          }))}
+          empty="No account sessions recorded"
+          muted={muted}
+          heading={heading}
+          border={border}
+        />
+        <DetailList
+          title="Devices"
+          items={(details?.all_devices || details?.devices || []).slice(0, 6).map((item) => ({
+            key: item.id,
+            primary: item.device_name || item.device_fingerprint || `Device #${item.id}`,
+            secondary: `${item.status} - ${formatDateTime(item.last_seen)}`,
+          }))}
+          empty="No device activity recorded"
+          muted={muted}
+          heading={heading}
+          border={border}
+        />
+      </div>
+      <section className={`rounded-xl border p-4 ${border}`}>
+        <h4 className={`mb-3 text-sm font-semibold ${heading}`}>Recent payments</h4>
+        {(details?.payments || []).length ? (
+          <div className="grid gap-2">
+            {(details?.payments || []).slice(0, 8).map((payment) => (
+              <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className={heading}>#{payment.id} - {payment.plan_name || `Plan ${payment.plan_id || "--"}`}</span>
+                <span className={muted}>{payment.currency || "INR"} {(Number(payment.amount || 0) / 100).toFixed(2)} - {payment.status} - {formatDate(payment.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={`text-xs ${muted}`}>No payments recorded</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 Field.propTypes = {
   label: PropTypes.string.isRequired,
   muted: PropTypes.string.isRequired,
@@ -760,6 +857,14 @@ DetailList.propTypes = {
     secondary: PropTypes.string.isRequired,
   })).isRequired,
   empty: PropTypes.string.isRequired,
+  muted: PropTypes.string.isRequired,
+  heading: PropTypes.string.isRequired,
+  border: PropTypes.string.isRequired,
+};
+
+AccountUsageContent.propTypes = {
+  details: PropTypes.object,
+  fallbackUser: PropTypes.object,
   muted: PropTypes.string.isRequired,
   heading: PropTypes.string.isRequired,
   border: PropTypes.string.isRequired,

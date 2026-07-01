@@ -95,6 +95,16 @@ def _today_ledger_usage(session, user_id: int, now: datetime) -> dict[str, Any]:
     }
 
 
+def _latest_activity_at(*values: datetime | None) -> str | None:
+    normalized = []
+    for value in values:
+        if not value:
+            continue
+        normalized.append(value if value.tzinfo else value.replace(tzinfo=timezone.utc))
+    latest = max(normalized, default=None)
+    return latest.isoformat() if latest else None
+
+
 def _ensure_usage_cycle(session, user_id: int, subscription_id: int, plan: SubscriptionPlan, now: datetime) -> None:
     existing = (
         session.query(UsageCycle)
@@ -175,58 +185,84 @@ async def list_users(
     # Enrich with subscription info
     session = get_session()
     try:
+        now = _utcnow()
         user_dicts = []
         for u in users:
             d = u.to_dict()
-            sub = session.query(UserSubscription).filter(
+            active_sub = session.query(UserSubscription).filter(
                 UserSubscription.user_id == u.id,
                 UserSubscription.status == "active",
-            ).first()
+            ).order_by(UserSubscription.created_at.desc()).first()
+            latest_sub = session.query(UserSubscription).filter(
+                UserSubscription.user_id == u.id,
+            ).order_by(UserSubscription.created_at.desc()).first()
+            sub = active_sub or latest_sub
+            plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first() if sub else None
+            cycle = None
             if sub:
-                plan = session.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
                 cycle = session.query(UsageCycle).filter(
                     UsageCycle.user_id == u.id,
                     UsageCycle.subscription_id == sub.id,
                 ).order_by(UsageCycle.cycle_start_at.desc()).first()
-                active_key = (
-                    session.query(UserApiKey)
-                    .filter(UserApiKey.user_id == u.id, UserApiKey.status == "active")
-                    .order_by(UserApiKey.issued_at.desc())
-                    .first()
+            if not cycle:
+                cycle = session.query(UsageCycle).filter(
+                    UsageCycle.user_id == u.id,
+                ).order_by(UsageCycle.cycle_end_at.desc()).first()
+            active_key = (
+                session.query(UserApiKey)
+                .filter(UserApiKey.user_id == u.id, UserApiKey.status == "active")
+                .order_by(UserApiKey.issued_at.desc())
+                .first()
+            )
+            key_usage = _user_key_usage_summary(session, int(u.id))
+            sessions = (
+                session.query(
+                    func.count(UserSession.id),
+                    func.max(UserSession.last_seen_at),
                 )
-                key_usage = _user_key_usage_summary(session, int(u.id))
-                quota_used = int(cycle.used_count if cycle else 0)
-                d["plan_name"] = plan.name if plan else None
-                d["plan_monthly_limit"] = plan.monthly_limit if plan else None
-                d["plan_rate_limit_rpm"] = plan.rate_limit_rpm if plan else None
-                d["plan_rate_limit_burst"] = plan.rate_limit_burst if plan else None
-                d["subscription_expiry"] = sub.end_at.isoformat() if sub.end_at else None
-                d["usage_used"] = quota_used
-                d["quota_used"] = quota_used
-                d["quota_limit"] = cycle.monthly_limit if cycle else (plan.monthly_limit if plan else 0)
-                d["plan_usage_used"] = quota_used
-                d["request_usage_count"] = key_usage["total_usage_count"]
-                d["active_key_id"] = active_key.id if active_key else None
-                d["active_key_prefix"] = active_key.key_prefix_display if active_key else None
-                d["key_usage_count"] = key_usage["total_usage_count"]
-                d["active_key_usage_count"] = active_key.usage_count if active_key else 0
-                d["key_last_used_at"] = key_usage["last_used_at"]
-            else:
-                d["plan_name"] = None
-                d["plan_monthly_limit"] = None
-                d["plan_rate_limit_rpm"] = None
-                d["plan_rate_limit_burst"] = None
-                d["subscription_expiry"] = None
-                d["usage_used"] = 0
-                d["quota_used"] = 0
-                d["quota_limit"] = 0
-                d["plan_usage_used"] = 0
-                d["request_usage_count"] = 0
-                d["active_key_id"] = None
-                d["active_key_prefix"] = None
-                d["key_usage_count"] = 0
-                d["active_key_usage_count"] = 0
-                d["key_last_used_at"] = None
+                .filter(UserSession.user_id == u.id, UserSession.status == "active")
+                .one()
+            )
+            key_ids = [row.id for row in session.query(UserApiKey.id).filter(UserApiKey.user_id == u.id).all()]
+            device_count = (
+                session.query(UserApiKeyDevice)
+                .filter(UserApiKeyDevice.api_key_id.in_(key_ids), UserApiKeyDevice.status == "active")
+                .count()
+            ) if key_ids else 0
+            sync_blob = session.query(EncryptedBackup).filter(EncryptedBackup.user_id == u.id).first()
+            today = _today_ledger_usage(session, int(u.id), now)
+            quota_used = int(cycle.used_count if cycle else 0)
+            quota_limit = int(cycle.monthly_limit if cycle else (plan.monthly_limit if plan else 0))
+            d["plan_name"] = plan.name if plan else None
+            d["plan_code"] = plan.code if plan else None
+            d["plan_monthly_limit"] = plan.monthly_limit if plan else None
+            d["plan_rate_limit_rpm"] = plan.rate_limit_rpm if plan else None
+            d["plan_rate_limit_burst"] = plan.rate_limit_burst if plan else None
+            d["subscription_status"] = sub.status if sub else None
+            d["subscription_expiry"] = sub.end_at.isoformat() if sub and sub.end_at else None
+            d["usage_used"] = quota_used
+            d["quota_used"] = quota_used
+            d["quota_limit"] = quota_limit
+            d["quota_remaining"] = max(0, quota_limit - quota_used)
+            d["plan_usage_used"] = quota_used
+            d["today_credits_used"] = int(today["credits_used"])
+            d["request_usage_count"] = key_usage["total_usage_count"]
+            d["active_key_id"] = active_key.id if active_key else None
+            d["active_key_prefix"] = active_key.key_prefix_display if active_key else None
+            d["key_usage_count"] = key_usage["total_usage_count"]
+            d["active_key_usage_count"] = active_key.usage_count if active_key else 0
+            d["key_last_used_at"] = key_usage["last_used_at"]
+            d["active_session_count"] = int(sessions[0] or 0)
+            d["active_device_count"] = int(device_count or 0)
+            d["sync_backup_size_bytes"] = int(sync_blob.blob_size_bytes or 0) if sync_blob else 0
+            d["sync_updated_at"] = sync_blob.updated_at.isoformat() if sync_blob and sync_blob.updated_at else None
+            d["last_activity_at"] = _latest_activity_at(
+                u.last_login_at,
+                sessions[1],
+                _parse_datetime(key_usage["last_used_at"]),
+                sync_blob.updated_at if sync_blob else None,
+                cycle.updated_at if cycle else None,
+            )
             user_dicts.append(d)
     finally:
         session.close()
@@ -263,6 +299,7 @@ async def get_user(request: Request, user_id: int) -> Any:
             for p in session.query(SubscriptionPlan).filter(SubscriptionPlan.id.in_(plan_ids)).all()
         } if plan_ids else {}
         active_sub = next((s for s in subs if s.status == "active"), None)
+        display_sub = active_sub or (subs[0] if subs else None)
         active_key = (
             session.query(UserApiKey)
             .filter(UserApiKey.user_id == user.id, UserApiKey.status == "active")
@@ -314,17 +351,20 @@ async def get_user(request: Request, user_id: int) -> Any:
         data["active_subscription"] = (
             _serialize_subscription(active_sub, plans.get(active_sub.plan_id)) if active_sub else None
         )
+        data["display_subscription"] = (
+            _serialize_subscription(display_sub, plans.get(display_sub.plan_id)) if display_sub else None
+        )
         data["subscriptions"] = [_serialize_subscription(s, plans.get(s.plan_id)) for s in subs]
         usage = None
         key_usage = _user_key_usage_summary(session, int(user.id))
-        if active_sub:
+        if display_sub:
             cycle = (
                 session.query(UsageCycle)
-                .filter(UsageCycle.user_id == user.id, UsageCycle.subscription_id == active_sub.id)
+                .filter(UsageCycle.user_id == user.id, UsageCycle.subscription_id == display_sub.id)
                 .order_by(UsageCycle.cycle_start_at.desc())
                 .first()
             )
-            plan = plans.get(active_sub.plan_id)
+            plan = plans.get(display_sub.plan_id)
             quota_used = int(cycle.used_count if cycle else 0)
             usage = {
                 "quota_used": quota_used,
@@ -348,8 +388,8 @@ async def get_user(request: Request, user_id: int) -> Any:
         data["usage"]["remaining"] = max(0, int(data["usage"].get("quota_limit") or 0) - int(data["usage"].get("quota_used") or 0))
         data["usage"]["today"] = _today_ledger_usage(session, int(user.id), now)
         data["rate_limit"] = {
-            "requests_per_minute": plans.get(active_sub.plan_id).rate_limit_rpm if active_sub and plans.get(active_sub.plan_id) else None,
-            "burst": plans.get(active_sub.plan_id).rate_limit_burst if active_sub and plans.get(active_sub.plan_id) else None,
+            "requests_per_minute": plans.get(display_sub.plan_id).rate_limit_rpm if display_sub and plans.get(display_sub.plan_id) else None,
+            "burst": plans.get(display_sub.plan_id).rate_limit_burst if display_sub and plans.get(display_sub.plan_id) else None,
         }
         data["devices"] = [
             {
@@ -401,10 +441,10 @@ async def get_user(request: Request, user_id: int) -> Any:
             "updated_at": sync_blob.updated_at.isoformat() if sync_blob and sync_blob.updated_at else None,
         }
         data["plan_limits"] = {
-            "monthly_limit": plans.get(active_sub.plan_id).monthly_limit if active_sub and plans.get(active_sub.plan_id) else None,
-            "duration_days": plans.get(active_sub.plan_id).duration_days if active_sub and plans.get(active_sub.plan_id) else None,
-            "max_devices": plans.get(active_sub.plan_id).max_devices if active_sub and plans.get(active_sub.plan_id) else None,
-            "allowed_services": plans.get(active_sub.plan_id).allowed_services if active_sub and plans.get(active_sub.plan_id) else {},
+            "monthly_limit": plans.get(display_sub.plan_id).monthly_limit if display_sub and plans.get(display_sub.plan_id) else None,
+            "duration_days": plans.get(display_sub.plan_id).duration_days if display_sub and plans.get(display_sub.plan_id) else None,
+            "max_devices": plans.get(display_sub.plan_id).max_devices if display_sub and plans.get(display_sub.plan_id) else None,
+            "allowed_services": plans.get(display_sub.plan_id).allowed_services if display_sub and plans.get(display_sub.plan_id) else {},
         }
         data["payments"] = [p.to_dict() for p in payments]
         return JSONResponse(data)
