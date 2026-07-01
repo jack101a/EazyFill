@@ -51,10 +51,62 @@
 
   function routeCandidates(site) {
     if (!site || typeof site !== "object") return [];
+    if (Array.isArray(site)) return site.filter((item) => item && typeof item === "object");
     if (site.routes && typeof site.routes === "object") {
       return Object.values(site.routes).filter((item) => item && typeof item === "object");
     }
     return [site];
+  }
+
+  function routeKey(route = {}) {
+    return [
+      route.sourceSelector || route.source || route.source_selector || "",
+      route.targetSelector || route.target || route.target_selector || "",
+      route.fieldName || route.field_name || route.id || ""
+    ].join("\n");
+  }
+
+  function normalizeApprovedRoute(route = {}, index = 0) {
+    const fieldName = route.fieldName || route.field_name || route.id || `captcha_${index + 1}`;
+    return {
+      ...route,
+      id: route.id || fieldName,
+      fieldName,
+      field_name: fieldName,
+      taskType: route.taskType || route.task_type || "image",
+      task_type: route.task_type || route.taskType || "image",
+      sourceSelector: route.sourceSelector || route.source_selector || route.source || "",
+      source_selector: route.source_selector || route.sourceSelector || route.source || "",
+      targetSelector: route.targetSelector || route.target_selector || route.target || "",
+      target_selector: route.target_selector || route.targetSelector || route.target || "",
+      routeStatus: route.routeStatus || route.route_status || route.status || "approved",
+      status: route.status || route.routeStatus || route.route_status || "approved",
+      autoSolve: route.autoSolve !== false && route.auto_solve !== false,
+      serverManaged: route.serverManaged !== false
+    };
+  }
+
+  function mergeSiteConfig(localSite, approvedRoutes = []) {
+    const domain = currentDomain();
+    const merged = [];
+    const seen = new Set();
+    const push = (route, serverManaged = false) => {
+      if (!route || typeof route !== "object") return;
+      const normalized = serverManaged ? normalizeApprovedRoute(route, merged.length) : route;
+      const key = routeKey(normalized);
+      if (!key.trim() || seen.has(key)) return;
+      seen.add(key);
+      merged.push(normalized);
+    };
+    approvedRoutes.forEach((route) => push(route, true));
+    routeCandidates(localSite).forEach((route) => push(route, false));
+    if (!merged.length && !localSite) return null;
+    return {
+      ...(localSite || {}),
+      domain,
+      activeFieldName: "",
+      routes: Object.fromEntries(merged.map((route, index) => [route.id || route.fieldName || route.field_name || `route_${index}`, route]))
+    };
   }
 
   function activeProfileId(settings = {}) {
@@ -71,6 +123,7 @@
   }
 
   function routeMatchesProfile(route, settings = {}) {
+    if (route.serverManaged === true || route.server_managed === true) return true;
     return routeProfileIds(route).includes(activeProfileId(settings));
   }
 
@@ -99,13 +152,18 @@
     const visible = candidates.filter((route) => {
       if (!routeMatchesProfile(route, settings)) return false;
       const sourceSelector = route.sourceSelector || route.source || route.source_selector;
-      if (!sourceSelector || !findBySelector(sourceSelector).length) return false;
+      const targetSelector = route.targetSelector || route.target || route.target_selector;
+      if (!sourceSelector || !targetSelector) return false;
+      const source = findBySelector(sourceSelector);
+      const target = findBySelector(targetSelector);
+      if (!source.some(isVisible)) return false;
+      if (!target.some((element) => element instanceof HTMLElement && isVisible(element))) return false;
       if (requireApproved && !isApprovedRoute(route)) return false;
       if (requireAutoSolve && !(route.autoSolve === true || route.auto_solve === true)) return false;
       return true;
     });
     if (!visible.length) return null;
-    return visible.find((route) => route.fieldName === site.activeFieldName || route.field_name === site.activeFieldName) || visible[0];
+    return visible[0];
   }
 
   async function refreshRouteStatus(route) {
@@ -136,7 +194,15 @@
     });
     const data = response.ok ? response.data || {} : {};
     const settings = data.fp_settings || {};
-    const site = normalizeSiteConfig(data.fp_captcha_selectors);
+    const localSite = normalizeSiteConfig(data.fp_captcha_selectors);
+    const approvedResponse = await sendMessage({
+      type: "CAPTCHA_ROUTES_FOR_DOMAIN",
+      domain: currentDomain()
+    });
+    const approvedRoutes = approvedResponse.ok && Array.isArray(approvedResponse.routes)
+      ? approvedResponse.routes
+      : [];
+    const site = mergeSiteConfig(localSite, approvedRoutes);
     configCache = {
       enabled: settings.extensionEnabled !== false && settings.captchaEnabled !== false,
       site,

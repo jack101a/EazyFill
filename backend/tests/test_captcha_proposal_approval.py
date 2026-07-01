@@ -11,8 +11,10 @@ from app.api.admin_routes import captcha_proposals
 class _FakeSolver:
     def __init__(self, result):
         self.result = result
+        self.calls = []
 
     async def solve_direct(self, **kwargs):
+        self.calls.append(kwargs)
         return {
             "result": self.result,
             "model_used": kwargs.get("model_filename") or "model.onnx",
@@ -145,7 +147,7 @@ def test_captcha_proposal_approval_rejects_model_sample_mismatch(monkeypatch, tm
     response = _client(fake_db, _FakeSolver("WRONG")).post(
         "/admin/api/captcha/proposals/1/approve",
         headers=_headers(monkeypatch),
-        json={"model_id": 9},
+        json={"model_id": 9, "verify_sample": True},
     )
 
     assert response.status_code == 409
@@ -162,10 +164,31 @@ def test_captcha_proposal_approval_accepts_matching_sample(monkeypatch, tmp_path
     response = _client(fake_db, _FakeSolver("ABC123")).post(
         "/admin/api/captcha/proposals/1/approve",
         headers=_headers(monkeypatch),
-        json={"model_id": 9},
+        json={"model_id": 9, "verify_sample": True},
     )
 
     assert response.status_code == 200
     assert fake_db.mappings[0]["field_name"] == "captcha_route"
     assert fake_db.mappings[0]["ai_model_id"] == 9
     assert fake_db.statuses == [(1, "approved")]
+
+
+def test_captcha_proposal_approval_accepts_selector_route_without_sample(monkeypatch, tmp_path):
+    monkeypatch.setattr(captcha_proposals, "_PROJECT_ROOT", tmp_path)
+    fake_db = _FakeDb(tmp_path / "test.db")
+    with fake_db.connect() as conn:
+        conn.execute("DELETE FROM retrain_samples")
+        conn.commit()
+    solver = _FakeSolver("WRONG")
+
+    response = _client(fake_db, solver).post(
+        "/admin/api/captcha/proposals/1/approve",
+        headers=_headers(monkeypatch),
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert fake_db.mappings[0]["field_name"] == "captcha_route"
+    assert fake_db.mappings[0]["ai_model_id"] == 9
+    assert fake_db.statuses == [(1, "approved")]
+    assert solver.calls == []

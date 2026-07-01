@@ -63,6 +63,24 @@ function formatCount(value) {
   return Number(value || 0).toLocaleString();
 }
 
+function formatDateTime(value) {
+  return value ? new Date(value).toLocaleString() : "--";
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function usagePercent(used, limit) {
+  const cap = Number(limit || 0);
+  if (cap <= 0) return 0;
+  return Math.min(100, Math.round((Number(used || 0) / cap) * 100));
+}
+
 function planDuration(plans, planId) {
   const plan = plans.find((p) => String(p.id) === String(planId));
   return plan?.duration_days || 30;
@@ -529,6 +547,93 @@ export function UsersPanel({ showToast }) {
             {editingUser && (
               <div className="mt-6 grid grid-cols-1 gap-4">
                 <section className={`rounded-xl border p-4 ${t_borderLight}`}>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className={`text-sm font-semibold ${t_textHeading}`}>Account usage</h4>
+                      <p className={`text-xs ${t_textMuted}`}>Quota, sync storage, active sessions, and device state.</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-xs ${STATUS_COLORS[userDetails?.status] || STATUS_COLORS.inactive}`}>
+                      {userDetails?.status || editingUser.status}
+                    </span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <MetricCard
+                      label="Cycle usage"
+                      value={`${formatCount(userDetails?.usage?.quota_used)}/${formatCount(userDetails?.usage?.quota_limit)}`}
+                      detail={`${usagePercent(userDetails?.usage?.quota_used, userDetails?.usage?.quota_limit)}% used`}
+                      muted={t_textMuted}
+                      heading={t_textHeading}
+                      border={t_borderLight}
+                    />
+                    <MetricCard
+                      label="Today"
+                      value={formatCount(userDetails?.usage?.today?.credits_used)}
+                      detail="credits used"
+                      muted={t_textMuted}
+                      heading={t_textHeading}
+                      border={t_borderLight}
+                    />
+                    <MetricCard
+                      label="Cloud backup"
+                      value={formatBytes(userDetails?.sync_backup?.blob_size_bytes)}
+                      detail={userDetails?.sync_backup?.updated_at ? `v${userDetails.sync_backup.sync_version} · ${formatDate(userDetails.sync_backup.updated_at)}` : "No sync blob"}
+                      muted={t_textMuted}
+                      heading={t_textHeading}
+                      border={t_borderLight}
+                    />
+                    <MetricCard
+                      label="Sessions"
+                      value={formatCount((userDetails?.sessions || []).filter((item) => item.status === "active").length)}
+                      detail={`${formatCount(userDetails?.plan_limits?.max_devices || 0)} device limit`}
+                      muted={t_textMuted}
+                      heading={t_textHeading}
+                      border={t_borderLight}
+                    />
+                  </div>
+                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                    <DetailList
+                      title="Recent sessions"
+                      items={(userDetails?.sessions || []).slice(0, 5).map((item) => ({
+                        key: item.id,
+                        primary: item.device_name || item.device_id || `Session #${item.id}`,
+                        secondary: `${item.status} · ${formatDateTime(item.last_seen)}`,
+                      }))}
+                      empty="No account sessions recorded"
+                      muted={t_textMuted}
+                      heading={t_textHeading}
+                      border={t_borderLight}
+                    />
+                    <DetailList
+                      title="Devices"
+                      items={(userDetails?.all_devices || userDetails?.devices || []).slice(0, 5).map((item) => ({
+                        key: item.id,
+                        primary: item.device_name || item.device_fingerprint || `Device #${item.id}`,
+                        secondary: `${item.status} · ${formatDateTime(item.last_seen)}`,
+                      }))}
+                      empty="No device activity recorded"
+                      muted={t_textMuted}
+                      heading={t_textHeading}
+                      border={t_borderLight}
+                    />
+                  </div>
+                  <div className={`mt-4 rounded-xl border ${t_borderLight} p-3`}>
+                    <div className={`mb-2 text-xs font-semibold uppercase ${t_textMuted}`}>Recent payments</div>
+                    {(userDetails?.payments || []).length ? (
+                      <div className="grid gap-2">
+                        {(userDetails?.payments || []).slice(0, 5).map((payment) => (
+                          <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <span className={t_textHeading}>#{payment.id} · {payment.plan_name || `Plan ${payment.plan_id || "--"}`}</span>
+                            <span className={t_textMuted}>{payment.currency || "INR"} {(Number(payment.amount || 0) / 100).toFixed(2)} · {payment.status} · {formatDate(payment.created_at)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={`text-xs ${t_textMuted}`}>No payments recorded</p>
+                    )}
+                  </div>
+                </section>
+
+                <section className={`rounded-xl border p-4 ${t_borderLight}`}>
                   <h4 className={`text-sm font-semibold mb-3 ${t_textHeading}`}>Subscription</h4>
                   <div className={`text-xs mb-3 ${t_textMuted}`}>
                     Current: {userDetails?.active_subscription?.plan_name || "--"} · Expires {formatDate(userDetails?.active_subscription?.end_at)}
@@ -602,10 +707,62 @@ function Field({ label, muted, children }) {
   );
 }
 
+function MetricCard({ label, value, detail, muted, heading, border }) {
+  return (
+    <div className={`rounded-xl border ${border} p-3`}>
+      <div className={`text-xs font-semibold uppercase ${muted}`}>{label}</div>
+      <div className={`mt-1 text-lg font-semibold ${heading}`}>{value}</div>
+      <div className={`mt-1 text-xs ${muted}`}>{detail}</div>
+    </div>
+  );
+}
+
+function DetailList({ title, items, empty, muted, heading, border }) {
+  return (
+    <div className={`rounded-xl border ${border} p-3`}>
+      <div className={`mb-2 text-xs font-semibold uppercase ${muted}`}>{title}</div>
+      {items.length ? (
+        <div className="grid gap-2">
+          {items.map((item) => (
+            <div key={item.key} className="text-xs">
+              <div className={`font-medium ${heading}`}>{item.primary}</div>
+              <div className={muted}>{item.secondary}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className={`text-xs ${muted}`}>{empty}</p>
+      )}
+    </div>
+  );
+}
+
 Field.propTypes = {
   label: PropTypes.string.isRequired,
   muted: PropTypes.string.isRequired,
   children: PropTypes.node.isRequired,
+};
+
+MetricCard.propTypes = {
+  label: PropTypes.string.isRequired,
+  value: PropTypes.string.isRequired,
+  detail: PropTypes.string.isRequired,
+  muted: PropTypes.string.isRequired,
+  heading: PropTypes.string.isRequired,
+  border: PropTypes.string.isRequired,
+};
+
+DetailList.propTypes = {
+  title: PropTypes.string.isRequired,
+  items: PropTypes.arrayOf(PropTypes.shape({
+    key: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+    primary: PropTypes.string.isRequired,
+    secondary: PropTypes.string.isRequired,
+  })).isRequired,
+  empty: PropTypes.string.isRequired,
+  muted: PropTypes.string.isRequired,
+  heading: PropTypes.string.isRequired,
+  border: PropTypes.string.isRequired,
 };
 
 UsersPanel.propTypes = {

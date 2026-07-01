@@ -104,6 +104,25 @@ def _active_models(container) -> list[dict[str, Any]]:
     ]
 
 
+def _select_model(container, model_id: int | None) -> dict[str, Any]:
+    models = [item for item in container.db.get_model_registry() if item.get("status") == "active"]
+    if model_id is not None:
+        model = next((item for item in models if int(item["id"]) == int(model_id)), None)
+        if not model:
+            raise HTTPException(status_code=400, detail=f"Model {model_id} not found or not active")
+        return model
+    model = next((item for item in models if str(item.get("task_type") or "image") == "image"), None) or (models[0] if models else None)
+    if not model:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "active_model_required",
+                "message": "Upload or activate a CAPTCHA model before approving this route.",
+            },
+        )
+    return model
+
+
 def _latest_labeled_sample(container, proposal: dict, field_name: str) -> dict[str, Any] | None:
     names = [field_name]
     proposed = str(proposal.get("proposed_field_name") or "").strip()
@@ -172,7 +191,7 @@ async def _verify_model_sample(container, proposal: dict, field_name: str, model
         )
 
 
-async def _approve_one(container, proposal_id: int, model_id: int) -> None:
+async def _approve_one(container, proposal_id: int, model_id: int | None = None, verify_sample: bool = False) -> None:
     with container.db.models.connect() as conn:
         row = conn.execute(
             "SELECT * FROM field_mapping_proposals WHERE id = ?",
@@ -189,19 +208,15 @@ async def _approve_one(container, proposal_id: int, model_id: int) -> None:
         container.db.mark_field_mapping_proposal_status(proposal_id, "approved")
         return
 
-    model = next((item for item in container.db.get_model_registry() if int(item["id"]) == int(model_id)), None)
-    if not model:
-        raise HTTPException(status_code=400, detail=f"Model {model_id} not found")
-    if model.get("status") != "active":
-        raise HTTPException(status_code=400, detail=f"Model {model_id} is not active")
-
-    await _verify_model_sample(container, proposal, field_name, model)
+    model = _select_model(container, model_id)
+    if verify_sample:
+        await _verify_model_sample(container, proposal, field_name, model)
 
     container.db.set_field_mapping(
         domain=proposal["domain"],
         field_name=field_name,
         task_type=proposal["task_type"],
-        ai_model_id=int(model_id),
+        ai_model_id=int(model["id"]),
         source_data_type=proposal.get("source_data_type") or proposal["task_type"],
         source_selector=proposal.get("source_selector", ""),
         target_data_type=proposal.get("target_data_type") or "text",
@@ -239,13 +254,14 @@ async def approve_captcha_proposal(request: Request, proposal_id: int) -> Any:
         return denied
     container = request.app.state.container
     body = await request.json()
-    model_id = body.get("model_id")
-    if model_id is None:
-        return JSONResponse(
-            {"ok": False, "error": "model_id is required", "available_models": _active_models(container)},
-            status_code=400,
-        )
-    await _approve_one(container, int(proposal_id), int(model_id))
+    raw_model_id = body.get("model_id")
+    model_id = int(raw_model_id) if raw_model_id not in (None, "") else None
+    await _approve_one(
+        container,
+        int(proposal_id),
+        model_id,
+        verify_sample=bool(body.get("verify_sample") or body.get("verifySample")),
+    )
     _write_auto_backup(container, "captcha_proposal_approve")
     return JSONResponse({"ok": True})
 

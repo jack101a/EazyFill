@@ -6,8 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.database import Database
 from app.core.paths import get_project_root
@@ -47,6 +47,20 @@ def _model_in_use(container, model_id: int) -> list[dict[str, Any]]:
     ]
 
 
+def _sample_image_path(image_path: str) -> Path | None:
+    raw = str(image_path or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = _PROJECT_ROOT / candidate
+    resolved = candidate.resolve()
+    samples_dir = (_PROJECT_ROOT / "data" / "captcha_samples").resolve()
+    if resolved == samples_dir or samples_dir not in resolved.parents:
+        return None
+    return resolved
+
+
 @router.get("/api/captcha/models")
 async def list_captcha_models(request: Request) -> Any:
     denied = _admin_guard(request)
@@ -57,6 +71,74 @@ async def list_captcha_models(request: Request) -> Any:
         "models": container.db.get_model_registry(),
         "field_mappings": container.db.get_all_field_mappings(),
     })
+
+
+@router.get("/api/captcha/samples")
+async def list_captcha_samples(
+    request: Request,
+    status: str = Query("all"),
+    domain: str | None = Query(None),
+    limit: int = Query(60, ge=1, le=200),
+) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    status_filter = str(status or "all").strip().lower()
+    clean_domain = Database._normalize_domain(domain)
+    allowed_statuses = {"queued", "labeled", "rejected", "consumed"}
+    if status_filter != "all" and status_filter not in allowed_statuses:
+        return _json_error("invalid sample status")
+
+    where: list[str] = []
+    params: list[Any] = []
+    if status_filter != "all":
+        where.append("status = ?")
+        params.append(status_filter)
+    if clean_domain:
+        where.append("domain = ?")
+        params.append(clean_domain)
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    params.append(int(limit))
+    with request.app.state.container.db.connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, domain, image_path, task_type, field_name, reported_by_kind,
+                   reported_by_user_id, status, label_text, labeled_at,
+                   consumed_by_job_id, created_at
+            FROM retrain_samples
+            {where_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+    samples = []
+    for row in rows:
+        item = dict(row)
+        image_path = _sample_image_path(str(item.get("image_path") or ""))
+        item["has_image"] = bool(image_path and image_path.exists())
+        item["image_url"] = f"/admin/api/captcha/samples/{int(item['id'])}/image" if item["has_image"] else None
+        samples.append(item)
+    counts = request.app.state.container.db.get_retrain_sample_counts()
+    return JSONResponse({"samples": samples, "counts": counts})
+
+
+@router.get("/api/captcha/samples/{sample_id}/image")
+async def captcha_sample_image(request: Request, sample_id: int) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    with request.app.state.container.db.connect() as conn:
+        row = conn.execute(
+            "SELECT image_path FROM retrain_samples WHERE id = ?",
+            (int(sample_id),),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="sample_not_found")
+    target = _sample_image_path(str(row["image_path"] or ""))
+    if not target or not target.exists():
+        raise HTTPException(status_code=404, detail="sample_image_not_found")
+    return FileResponse(target, media_type="image/png")
 
 
 @router.post("/api/captcha/models/upload")
@@ -201,6 +283,44 @@ async def set_captcha_mapping(request: Request) -> Any:
     )
     _write_auto_backup(request.app.state.container, "captcha_mapping_set")
     return JSONResponse({"ok": True})
+
+
+@router.post("/api/captcha/mappings/bulk-model")
+async def bulk_update_captcha_mapping_model(request: Request) -> Any:
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    body = await request.json()
+    ai_model_id = int(body.get("ai_model_id") or 0)
+    mapping_ids = [int(item) for item in (body.get("mapping_ids") or []) if str(item).strip().isdigit()]
+    if ai_model_id <= 0:
+        return _json_error("ai_model_id is required")
+    if not mapping_ids:
+        return _json_error("Select at least one mapping")
+    model = request.app.state.container.db.get_model_registry_entry(ai_model_id)
+    if not model or str(model.get("status") or "") != "active":
+        return _json_error("active model not found", status_code=404)
+
+    id_set = set(mapping_ids)
+    mappings = [
+        row
+        for row in request.app.state.container.db.get_all_field_mappings()
+        if int(row.get("id") or 0) in id_set
+    ]
+    for row in mappings:
+        request.app.state.container.db.update_field_mapping(
+            mapping_id=int(row["id"]),
+            domain=str(row.get("domain") or ""),
+            field_name=str(row.get("field_name") or ""),
+            task_type=str(row.get("task_type") or "image"),
+            source_data_type=str(row.get("source_data_type") or row.get("task_type") or "image"),
+            source_selector=str(row.get("source_selector") or ""),
+            target_data_type=str(row.get("target_data_type") or "text"),
+            target_selector=str(row.get("target_selector") or ""),
+            ai_model_id=ai_model_id,
+        )
+    _write_auto_backup(request.app.state.container, "captcha_mapping_bulk_model_update")
+    return JSONResponse({"ok": True, "updated": len(mappings), "requested": len(mapping_ids)})
 
 
 @router.put("/api/captcha/mappings/{mapping_id}")

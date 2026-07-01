@@ -53,6 +53,7 @@ const state = {
   selectedProfileItemKeys: new Set(),
   expandedRuleIds: new Set()
 };
+let billingPaymentPollTimer = 0;
 
 const $ = (id) => document.getElementById(id);
 const panelIdFor = (id) => PANEL_ALIASES[id] || id;
@@ -317,6 +318,52 @@ function openExternalBillingUrl(url) {
   } catch (_) {
     return false;
   }
+}
+
+function clearBillingStatusPoll() {
+  if (!billingPaymentPollTimer) return;
+  clearTimeout(billingPaymentPollTimer);
+  billingPaymentPollTimer = 0;
+}
+
+async function refreshAccountAndBillingAfterPayment() {
+  const authResponse = await sendMessage({ type: "AUTH_STATUS_CHECK" }).catch(() => null);
+  if (authResponse?.auth) state.auth = authResponse.auth;
+  const data = await getStorage(["fp_auth", "fp_credits"]).catch(() => ({}));
+  if (data.fp_auth) state.auth = data.fp_auth;
+  if (data.fp_credits) state.credits = data.fp_credits;
+  renderStatus();
+  await loadBillingData();
+}
+
+function startBillingStatusPoll(paymentId) {
+  const id = Number(paymentId || 0);
+  if (!id) return;
+  clearBillingStatusPoll();
+  let attempts = 0;
+  const tick = async () => {
+    attempts += 1;
+    const response = await sendMessage({ type: "BILLING_PAYMENT_STATUS", paymentId: id }).catch((error) => ({ ok: false, error: error.message }));
+    const payment = response?.payment || response?.data?.payment || {};
+    const status = String(payment.status || "").toLowerCase();
+    if (response?.ok && ["approved", "paid", "captured"].includes(status)) {
+      clearBillingStatusPoll();
+      await refreshAccountAndBillingAfterPayment();
+      activatePanel("account-panel");
+      toast("Payment confirmed. Subscription updated.", "success");
+      return;
+    }
+    if (["failed", "rejected", "expired", "cancelled"].includes(status)) {
+      clearBillingStatusPoll();
+      await loadBillingData().catch(() => null);
+      toast(`Payment ${status}. Choose a plan again if needed.`, "warning");
+      return;
+    }
+    if (attempts < 60) {
+      billingPaymentPollTimer = setTimeout(tick, attempts < 10 ? 2500 : 5000);
+    }
+  };
+  billingPaymentPollTimer = setTimeout(tick, 2500);
 }
 
 function chromeMajorVersion() {
@@ -4150,14 +4197,18 @@ async function createBillingOrder(plan) {
   });
   if (!response.ok) throw new Error(response.error || "Order creation failed");
   if (provider === "razorpay") {
+    const paymentId = response.payment?.id || response.payment_id || response.paymentId || 0;
     const orderId = response.order?.id || response.payment?.provider_order_id || "";
     const checkoutUrl = response.checkout_url || response.checkoutUrl || response.order?.checkout_url || "";
     if (checkoutUrl && openExternalBillingUrl(checkoutUrl)) {
       toast("Razorpay checkout opened", "success");
+      startBillingStatusPoll(paymentId);
     } else if (checkoutUrl) {
       toast("Order created. Allow popups to open Razorpay checkout.", "warning");
+      startBillingStatusPoll(paymentId);
     } else {
       toast(orderId ? `Razorpay order created: ${orderId}` : "Razorpay order created", "success");
+      startBillingStatusPoll(paymentId);
     }
   }
   await loadBillingData();

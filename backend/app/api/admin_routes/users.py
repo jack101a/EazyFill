@@ -9,16 +9,20 @@ from fastapi import APIRouter, Request, Query
 from fastapi.responses import JSONResponse
 
 from app.core.models import (
+    CreditLedgerEntry,
+    EncryptedBackup,
     PaymentRecord,
     SubscriptionPlan,
     UsageCycle,
     User,
     UserApiKey,
     UserApiKeyDevice,
+    UserSession,
     UserSubscription,
 )
 from app.core.db import get_session
 from app.services.promo_plan_policy import check_promo_plan_eligibility
+from sqlalchemy import func
 
 from .utils import _admin_guard
 
@@ -68,6 +72,26 @@ def _user_key_usage_summary(session, user_id: int) -> dict:
     return {
         "total_usage_count": total,
         "last_used_at": last_used.isoformat() if last_used else None,
+    }
+
+
+def _today_ledger_usage(session, user_id: int, now: datetime) -> dict[str, Any]:
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = (
+        session.query(CreditLedgerEntry.event_type, func.coalesce(func.sum(CreditLedgerEntry.credit_delta), 0))
+        .filter(
+            CreditLedgerEntry.user_id == int(user_id),
+            CreditLedgerEntry.created_at >= day_start,
+            CreditLedgerEntry.credit_delta < 0,
+        )
+        .group_by(CreditLedgerEntry.event_type)
+        .all()
+    )
+    by_event = {event_type: abs(int(total or 0)) for event_type, total in rows}
+    return {
+        "date": day_start.date().isoformat(),
+        "credits_used": sum(by_event.values()),
+        "by_event": by_event,
     }
 
 
@@ -260,6 +284,32 @@ async def get_user(request: Request, user_id: int) -> Any:
             .limit(20)
             .all()
         )
+        all_keys = (
+            session.query(UserApiKey)
+            .filter(UserApiKey.user_id == user.id)
+            .order_by(UserApiKey.issued_at.desc())
+            .all()
+        )
+        all_key_ids = [int(key.id) for key in all_keys]
+        all_devices = (
+            session.query(UserApiKeyDevice)
+            .filter(UserApiKeyDevice.api_key_id.in_(all_key_ids))
+            .order_by(UserApiKeyDevice.last_seen_at.desc())
+            .all()
+        ) if all_key_ids else []
+        sessions = (
+            session.query(UserSession)
+            .filter(UserSession.user_id == user.id)
+            .order_by(UserSession.last_seen_at.desc())
+            .limit(20)
+            .all()
+        )
+        sync_blob = (
+            session.query(EncryptedBackup)
+            .filter(EncryptedBackup.user_id == user.id)
+            .first()
+        )
+        now = _utcnow()
 
         data["active_subscription"] = (
             _serialize_subscription(active_sub, plans.get(active_sub.plan_id)) if active_sub else None
@@ -295,6 +345,8 @@ async def get_user(request: Request, user_id: int) -> Any:
             "cycle_start": None,
             "cycle_end": None,
         }
+        data["usage"]["remaining"] = max(0, int(data["usage"].get("quota_limit") or 0) - int(data["usage"].get("quota_used") or 0))
+        data["usage"]["today"] = _today_ledger_usage(session, int(user.id), now)
         data["rate_limit"] = {
             "requests_per_minute": plans.get(active_sub.plan_id).rate_limit_rpm if active_sub and plans.get(active_sub.plan_id) else None,
             "burst": plans.get(active_sub.plan_id).rate_limit_burst if active_sub and plans.get(active_sub.plan_id) else None,
@@ -311,6 +363,49 @@ async def get_user(request: Request, user_id: int) -> Any:
             }
             for d in devices
         ]
+        data["all_devices"] = [
+            {
+                "id": d.id,
+                "api_key_id": d.api_key_id,
+                "device_fingerprint": (d.device_fingerprint[:20] + "...") if d.device_fingerprint else "",
+                "device_name": d.device_name,
+                "user_agent": d.user_agent[:120] if d.user_agent else "",
+                "status": d.status,
+                "first_seen": d.first_seen_at.isoformat() if d.first_seen_at else None,
+                "last_seen": d.last_seen_at.isoformat() if d.last_seen_at else None,
+            }
+            for d in all_devices
+        ]
+        data["sessions"] = [
+            {
+                "id": item.id,
+                "api_key_id": item.api_key_id,
+                "device_id": (item.device_id[:20] + "...") if item.device_id else "",
+                "device_name": item.device_name,
+                "user_agent": item.user_agent[:120] if item.user_agent else "",
+                "ip_address": item.ip_address,
+                "status": item.status,
+                "issued_at": item.issued_at.isoformat() if item.issued_at else None,
+                "expires_at": item.expires_at.isoformat() if item.expires_at else None,
+                "last_seen": item.last_seen_at.isoformat() if item.last_seen_at else None,
+            }
+            for item in sessions
+        ]
+        data["sync_backup"] = {
+            "found": bool(sync_blob),
+            "sync_version": int(sync_blob.sync_version or 0) if sync_blob else 0,
+            "blob_size_bytes": int(sync_blob.blob_size_bytes or 0) if sync_blob else 0,
+            "blob_hash": sync_blob.blob_hash if sync_blob else None,
+            "device_id": sync_blob.device_id if sync_blob else None,
+            "created_at": sync_blob.created_at.isoformat() if sync_blob and sync_blob.created_at else None,
+            "updated_at": sync_blob.updated_at.isoformat() if sync_blob and sync_blob.updated_at else None,
+        }
+        data["plan_limits"] = {
+            "monthly_limit": plans.get(active_sub.plan_id).monthly_limit if active_sub and plans.get(active_sub.plan_id) else None,
+            "duration_days": plans.get(active_sub.plan_id).duration_days if active_sub and plans.get(active_sub.plan_id) else None,
+            "max_devices": plans.get(active_sub.plan_id).max_devices if active_sub and plans.get(active_sub.plan_id) else None,
+            "allowed_services": plans.get(active_sub.plan_id).allowed_services if active_sub and plans.get(active_sub.plan_id) else {},
+        }
         data["payments"] = [p.to_dict() for p in payments]
         return JSONResponse(data)
     finally:

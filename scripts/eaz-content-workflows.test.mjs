@@ -59,13 +59,29 @@ try {
   await page.addInitScript(() => {
     const listeners = [];
     const sentMessages = [];
-    const route = {
-      id: "127.0.0.1",
+    const popupDraftRoute = {
+      id: "popup-stale-route",
       domain: "127.0.0.1",
+      sourceSelector: "#stalePopupCaptcha",
+      targetSelector: "#stalePopupAnswer",
+      taskType: "image",
+      autoSolve: true
+    };
+    const approvedServerRoute = {
+      id: "server-captcha",
+      domain: "127.0.0.1",
+      field_name: "server_captcha",
+      fieldName: "server_captcha",
+      source_selector: "#captchaText",
       sourceSelector: "#captchaText",
+      target_selector: "#captchaAnswer",
       targetSelector: "#captchaAnswer",
-      taskType: "text",
-      autoSolve: false
+      task_type: "image",
+      taskType: "image",
+      routeStatus: "approved",
+      status: "approved",
+      autoSolve: false,
+      serverManaged: true
     };
 
     function responseFor(message) {
@@ -82,7 +98,7 @@ try {
               captchaFillDelayMs: 120,
               captchaHumanTyping: true
             },
-            fp_captcha_selectors: { "127.0.0.1": route },
+            fp_captcha_selectors: { "127.0.0.1": { routes: { "popup-stale-route": popupDraftRoute }, activeFieldName: "popup-stale-route" } },
             fp_profiles: [{ id: "default", name: "Global", values: {} }],
             fp_rules: [{
               id: "rule-name",
@@ -130,6 +146,9 @@ try {
       }
       if (message.type === "CAPTCHA_SOLVE_REQUEST") {
         return { ok: true, result: "AB12" };
+      }
+      if (message.type === "CAPTCHA_ROUTES_FOR_DOMAIN") {
+        return { ok: true, domain: message.domain, routes: [approvedServerRoute] };
       }
       if (message.type === "RECORDER_SAVE_RULE") {
         return { ok: true, rule: message.rule };
@@ -204,6 +223,13 @@ try {
   assert.equal(solveResult.filled.fillDelayMs, 120);
   assert.ok(solveElapsed >= 100, `CAPTCHA fill delay was too short: ${solveElapsed} ms`);
   assert.equal(await page.locator("#captchaAnswer").inputValue(), "AB12");
+  const captchaSolveMessage = await page.evaluate(() => (
+    globalThis.__sentMessages.find((message) => message.type === "CAPTCHA_SOLVE_REQUEST")
+  ));
+  assert.equal(captchaSolveMessage.fieldName, "server_captcha");
+  assert.equal(captchaSolveMessage.sourceSelector, "#captchaText");
+  assert.equal(captchaSolveMessage.targetSelector, "#captchaAnswer");
+  assert.ok(await page.evaluate(() => globalThis.__sentMessages.some((message) => message.type === "CAPTCHA_ROUTES_FOR_DOMAIN")));
   const inputEvents = await page.evaluate(() => globalThis.__captchaInputEvents);
   assert.ok(inputEvents.length >= 5, `Expected clear plus typed input events, received ${inputEvents.length}`);
   assert.deepEqual(inputEvents.slice(-4).map((event) => event.value), ["A", "AB", "AB1", "AB12"]);

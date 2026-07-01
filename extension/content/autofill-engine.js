@@ -360,11 +360,14 @@
   }
 
   function selectUsableTarget(targets, settings) {
-    return targets.find((target) => {
+    const list = Array.isArray(targets) ? targets : [];
+    if (!list.length) return null;
+    if (settings.skipHidden === false && settings.skipLocked === false) return list[0] || null;
+    return list.find((target) => {
       if (settings.skipHidden !== false && !isElementVisible(target)) return false;
       if (settings.skipLocked !== false && isElementLocked(target)) return false;
       return true;
-    }) || targets[0] || null;
+    }) || null;
   }
 
   function radioForValue(element, value) {
@@ -533,11 +536,12 @@
     const timeoutMs = num(step.runtime?.timeoutMs, step.runtime?.timeout_ms, context.waitTimeoutMs);
     const resolved = await waitForTarget(step, timeoutMs, context.settings);
     if (!resolved.ok || !resolved.element) {
+      const skipMissing = !step.required || context.automatic === true || rule.execution.mode !== "flow";
       return {
-        ok: false,
-        skipped: !step.required,
+        ok: skipMissing,
+        skipped: skipMissing,
         action,
-        error: "Element not found",
+        error: resolved.matches ? "No usable visible element" : "Element not found",
         selector: step.selector,
         label: step.label || ""
       };
@@ -592,6 +596,7 @@
       waitTimeoutMs: rule.execution.waitTimeoutMs,
       profileValues: profileValues(profiles, activeProfileId(settings)),
       settings,
+      automatic: options.automatic === true,
       force: options.force === true
     };
     const results = [];

@@ -96,6 +96,32 @@ def _mapping_response(mapping: dict, status: str = "approved") -> dict:
     }
 
 
+def _route_payload(domain: str, field_name: str, mapping: dict) -> dict:
+    return {
+        "id": field_name,
+        "domain": mapping.get("domain") or domain,
+        "field_name": mapping.get("field_name") or field_name,
+        "fieldName": mapping.get("field_name") or field_name,
+        "task_type": mapping.get("task_type") or "image",
+        "taskType": mapping.get("task_type") or "image",
+        "source_data_type": mapping.get("source_data_type") or mapping.get("task_type") or "image",
+        "sourceSelector": mapping.get("source_selector") or "",
+        "source_selector": mapping.get("source_selector") or "",
+        "target_data_type": mapping.get("target_data_type") or "text",
+        "targetSelector": mapping.get("target_selector") or "",
+        "target_selector": mapping.get("target_selector") or "",
+        "routeStatus": "approved",
+        "status": "approved",
+        "autoSolve": True,
+        "serverManaged": True,
+        "model": {
+            "runtime": mapping.get("runtime") or mapping.get("ai_runtime"),
+            "filename": mapping.get("model_filename") or mapping.get("ai_model_filename"),
+            "lifecycle_state": mapping.get("lifecycle_state"),
+        },
+    }
+
+
 def _proposal_response(proposal: dict | None, field_name: str, sample_saved: bool = False) -> dict:
     status = str((proposal or {}).get("status") or "pending")
     return {
@@ -258,6 +284,31 @@ async def route_status(
         proposal,
         _route_field_name(normalized_domain, source_selector, target_selector),
     )
+
+
+@router.get("/routes")
+async def approved_routes(
+    request: Request,
+    domain: str,
+    ctx: V2AuthContext = Depends(validate_v2_key),
+) -> dict:
+    del ctx
+    container = request.app.state.container
+    normalized_domain = Database._normalize_domain(domain)
+    if not normalized_domain:
+        raise HTTPException(status_code=400, detail="domain is required")
+    mappings = (
+        container.db.get_domain_field_mappings(normalized_domain)
+        if hasattr(container.db, "get_domain_field_mappings")
+        else {}
+    )
+    routes = [
+        _route_payload(normalized_domain, field_name, mapping)
+        for field_name, mapping in (mappings or {}).items()
+        if (mapping.get("source_selector") or mapping.get("sourceSelector"))
+        and (mapping.get("target_selector") or mapping.get("targetSelector"))
+    ]
+    return {"ok": True, "domain": normalized_domain, "routes": routes}
 
 
 @router.post("/solve")

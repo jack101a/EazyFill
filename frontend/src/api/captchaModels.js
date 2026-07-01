@@ -8,6 +8,15 @@ export function fetchCaptchaModels() {
   return apiGet(adminApi("/captcha/models"));
 }
 
+export function fetchCaptchaSamples({ status = "all", domain = "", limit = 60 } = {}) {
+  const params = new URLSearchParams({
+    status: status || "all",
+    limit: String(limit || 60),
+  });
+  if (domain) params.set("domain", domain);
+  return apiGet(adminApi(`/captcha/samples?${params}`));
+}
+
 export function fetchCaptchaProposals(status = "pending") {
   return apiGet(adminApi(`/captcha/proposals?status=${encodeURIComponent(status)}`));
 }
@@ -27,8 +36,14 @@ export function setCaptchaMapping(payload) {
   return apiPostJson(adminApi("/captcha/mappings"), payload);
 }
 
-export function approveCaptchaProposal(proposalId, modelId) {
-  return apiPostJson(adminApi(`/captcha/proposals/${Number(proposalId)}/approve`), { model_id: Number(modelId) });
+export function bulkUpdateCaptchaMappingModel(payload) {
+  return apiPostJson(adminApi("/captcha/mappings/bulk-model"), payload);
+}
+
+export function approveCaptchaProposal(proposalId, modelId = "", verifySample = false) {
+  const payload = { verify_sample: !!verifySample };
+  if (modelId !== "" && modelId !== null && modelId !== undefined) payload.model_id = Number(modelId);
+  return apiPostJson(adminApi(`/captcha/proposals/${Number(proposalId)}/approve`), payload);
 }
 
 export function rejectCaptchaProposal(proposalId) {

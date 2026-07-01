@@ -126,6 +126,18 @@ def _app(ctx: V2AuthContext | None = None, *, quota_allowed: bool = True) -> Fas
         db=SimpleNamespace(
             get_field_mapped_model=MagicMock(return_value={"ai_model_filename": "login_captcha.onnx"}),
             get_field_mapping_by_selectors=MagicMock(return_value=None),
+            get_domain_field_mappings=MagicMock(return_value={
+                "login_captcha": {
+                    "task_type": "image",
+                    "source_data_type": "image",
+                    "source_selector": "#captcha-img",
+                    "target_data_type": "text",
+                    "target_selector": "#captcha-input",
+                    "runtime": "onnx",
+                    "model_filename": "login_captcha.onnx",
+                    "lifecycle_state": "production",
+                }
+            }),
             propose_field_mapping=MagicMock(return_value={
                 "id": 21,
                 "domain": "example.com",
@@ -850,6 +862,25 @@ def test_v2_plans_returns_catalog():
     assert body["payment_providers"][0]["code"] == "razorpay"
     assert body["payment_providers"][0]["available"] is True
     assert body["payment_providers"][0]["key_id"] == "rzp_test_key"
+
+
+def test_v2_captcha_routes_returns_backend_approved_domain_mappings():
+    app = _app()
+
+    response = TestClient(app).get(
+        "/v2/captcha/routes?domain=example.com",
+        headers={"X-Api-Key": "fp_test"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["domain"] == "example.com"
+    assert body["routes"][0]["field_name"] == "login_captcha"
+    assert body["routes"][0]["sourceSelector"] == "#captcha-img"
+    assert body["routes"][0]["targetSelector"] == "#captcha-input"
+    assert body["routes"][0]["routeStatus"] == "approved"
+    assert body["routes"][0]["serverManaged"] is True
 
 
 def test_v2_plans_repairs_empty_checkout_catalog():

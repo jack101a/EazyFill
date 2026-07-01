@@ -576,6 +576,11 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
     registerMessageHandler("BILLING_HISTORY", async () => ok(await apiClient.get("/v2/billing/history")));
     registerMessageHandler("BILLING_CREATE_ORDER", async (message) => ok(await apiClient.post("/v2/billing/create-order", message.payload || {})));
     registerMessageHandler("BILLING_VERIFY_PAYMENT", async (message) => ok(await apiClient.post("/v2/billing/verify-payment", message.payload || {})));
+    registerMessageHandler("BILLING_PAYMENT_STATUS", async (message) => {
+      const paymentId = Number(message.paymentId || message.payment_id || message.payload?.payment_id || 0);
+      if (!paymentId) throw new Error("payment_id is required");
+      return ok(await apiClient.get(`/api/payments/${encodeURIComponent(paymentId)}/status`, { skipAuth: true, retry: false }));
+    });
   }
 
   registerMessageHandler("RECORDER_SAVE_RULE", async (message) => {
@@ -789,6 +794,12 @@ export function registerCoreMessageHandlers({ apiClient, authManager, captchaHan
         target_selector: payload.target_selector || payload.targetSelector || ""
       });
       return ok(await apiClient.get(`/v2/captcha/routes/status?${params.toString()}`));
+    });
+    registerMessageHandler("CAPTCHA_ROUTES_FOR_DOMAIN", async (message) => {
+      const domain = String(message.domain || message.payload?.domain || "").trim();
+      if (!domain) throw new Error("domain is required");
+      const params = new URLSearchParams({ domain });
+      return ok(await apiClient.get(`/v2/captcha/routes?${params.toString()}`));
     });
   }
 
